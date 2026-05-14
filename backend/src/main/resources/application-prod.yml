@@ -1,0 +1,19 @@
+# Production overlay. All secrets come from the environment; startup fails if JWT_SECRET is missing.
+server:
+  forward-headers-strategy: framework
+
+management:
+  server:
+    # Keep actuator off the public port; only the internal network (Prometheus, probes) can reach it.
+    port: ${MANAGEMENT_PORT:8081}
+
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:false}
+
+logging:
+  structured:
+    format:
+      console: ecs

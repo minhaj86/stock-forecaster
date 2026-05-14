@@ -1,0 +1,22 @@
+# Local development against the docker-compose PostgreSQL. Never use in shared environments.
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5433/stockforecast}
+    username: ${DATABASE_USERNAME:stockforecast}
+    password: ${DATABASE_PASSWORD:stockforecast}
+
+app:
+  security:
+    jwt:
+      allow-ephemeral-secret: true
+    refresh-cookie:
+      # Browsers drop Secure cookies on plain-HTTP origins other than localhost.
+      secure: ${REFRESH_COOKIE_SECURE:false}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+  market-data:
+    provider: ${MARKET_DATA_PROVIDER:synthetic}
+
+logging:
+  level:
+    com.stockforecast: DEBUG
