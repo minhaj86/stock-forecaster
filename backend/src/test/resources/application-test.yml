@@ -1,0 +1,23 @@
+# Integration tests: the datasource is provided by Testcontainers (@ServiceConnection).
+app:
+  security:
+    jwt:
+      allow-ephemeral-secret: true
+    password:
+      bcrypt-strength: 4
+    session:
+      # Replay detection is exercised end-to-end; the grace-period race handling is covered by unit tests.
+      reuse-grace-period: 0s
+  cors:
+    allowed-origins: http://localhost:5173
+  market-data:
+    provider: synthetic
+    sync:
+      # Scheduled and startup synchronisation are exercised explicitly; event-driven backfill stays active.
+      cron: "-"
+      on-startup: false
+
+logging:
+  level:
+    com.stockforecast: INFO
+    org.testcontainers: INFO
