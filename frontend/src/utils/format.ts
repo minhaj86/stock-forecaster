@@ -1,0 +1,63 @@
+/**
+ * Locale-aware formatting for financial values. Ratios from the backend are decimal fractions (0.052 = 5.2 %).
+ */
+const locale = (): string | undefined => (typeof navigator === 'undefined' ? undefined : navigator.language);
+
+const PLACEHOLDER = '—';
+
+export function formatCurrency(value: number | null | undefined, currency = 'USD'): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return PLACEHOLDER;
+  return new Intl.NumberFormat(locale(), { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    .format(value);
+}
+
+export function formatSignedCurrency(value: number | null | undefined, currency = 'USD'): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return PLACEHOLDER;
+  return new Intl.NumberFormat(locale(), {
+    style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero',
+  }).format(value);
+}
+
+export function formatPercent(ratio: number | null | undefined, options: { signed?: boolean; digits?: number } = {}): string {
+  if (ratio === null || ratio === undefined || Number.isNaN(ratio)) return PLACEHOLDER;
+  const { signed = true, digits = 2 } = options;
+  return new Intl.NumberFormat(locale(), {
+    style: 'percent', minimumFractionDigits: digits, maximumFractionDigits: digits,
+    signDisplay: signed ? 'exceptZero' : 'auto',
+  }).format(ratio);
+}
+
+export function formatNumber(value: number | null | undefined, digits = 2): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return PLACEHOLDER;
+  return new Intl.NumberFormat(locale(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+}
+
+export function formatCompact(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return PLACEHOLDER;
+  return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+/** Formats a calendar date ("2026-10-09") without shifting it into the viewer's time zone. */
+export function formatDate(isoDate: string | null | undefined, style: 'medium' | 'long' = 'medium'): string {
+  if (!isoDate) return PLACEHOLDER;
+  const date = new Date(`${isoDate.slice(0, 10)}T00:00:00Z`);
+  return new Intl.DateTimeFormat(locale(), { dateStyle: style, timeZone: 'UTC' }).format(date);
+}
+
+export function formatTime(instant: string | null | undefined): string {
+  if (!instant) return PLACEHOLDER;
+  return new Intl.DateTimeFormat(locale(), { timeStyle: 'short' }).format(new Date(instant));
+}
+
+export function formatDateTime(instant: string | null | undefined): string {
+  if (!instant) return PLACEHOLDER;
+  return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(instant));
+}
+
+export function greeting(now: Date = new Date()): string {
+  const hour = now.getHours();
+  if (hour < 5) return 'Good evening';
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
