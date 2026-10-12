@@ -1,6 +1,13 @@
 package com.stockforecast.marketdata.infrastructure.provider.synthetic;
 
 import com.stockforecast.marketdata.DailyBar;
+import com.stockforecast.marketdata.MarketDataInterval;
+import com.stockforecast.marketdata.MarketDataProviders.ProviderUsage;
+import com.stockforecast.marketdata.MarketDataProviders.RateLimitStatus;
+import com.stockforecast.marketdata.ProviderHealth;
+import com.stockforecast.marketdata.application.MarketDataProvider.ProviderInstrument;
+import com.stockforecast.marketdata.application.ProviderErrorCode;
+import com.stockforecast.marketdata.application.ProviderUsageRecorder;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -72,17 +79,45 @@ class SyntheticMarketDataProviderTest {
         // Monday 22:00 UTC: after the US close.
         SyntheticMarketDataProvider afterClose = provider("2026-10-12T22:00:00Z");
 
-        assertThat(beforeClose.getHistoricalPrices("AAPL", LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 12))
-                .getLast().date()).isEqualTo(LocalDate.of(2026, 10, 9));
-        assertThat(afterClose.getHistoricalPrices("AAPL", LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 12))
-                .getLast().date()).isEqualTo(LocalDate.of(2026, 10, 12));
+        assertThat(beforeClose.getHistoricalPrices(AAPL, LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 12),
+                MarketDataInterval.ONE_DAY).prices().getLast().date()).isEqualTo(LocalDate.of(2026, 10, 9));
+        assertThat(afterClose.getHistoricalPrices(AAPL, LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 12),
+                MarketDataInterval.ONE_DAY).prices().getLast().date()).isEqualTo(LocalDate.of(2026, 10, 12));
         assertThat(afterClose.info().synthetic()).isTrue();
-        assertThat(afterClose.getQuote("AAPL")).hasValueSatisfying(quote ->
+        assertThat(afterClose.getLatestQuote(AAPL)).hasValueSatisfying(quote ->
                 assertThat(quote.price().signum()).isPositive());
-        assertThat(afterClose.searchStocks("apple")).isEmpty();
     }
 
+    @Test
+    void cannotSearchOrDescribeSecuritiesSoAdministratorsEnterThemManually() {
+        SyntheticMarketDataProvider provider = provider("2026-10-12T22:00:00Z");
+
+        assertThat(provider.capabilities().symbolSearch()).isFalse();
+        assertThat(provider.capabilities().metadataLookup()).isFalse();
+        assertThat(provider.searchStocks("apple")).isEmpty();
+        assertThat(provider.getStockMetadata(AAPL)).isEmpty();
+        assertThat(provider.checkHealth().status()).isEqualTo(ProviderHealth.Status.HEALTHY);
+    }
+
+    private static final ProviderInstrument AAPL = new ProviderInstrument("AAPL", "XNAS");
+
     private static SyntheticMarketDataProvider provider(String now) {
-        return new SyntheticMarketDataProvider(Clock.fixed(Instant.parse(now), ZoneOffset.UTC));
+        return new SyntheticMarketDataProvider(Clock.fixed(Instant.parse(now), ZoneOffset.UTC), new NoUsage());
+    }
+
+    private static final class NoUsage implements ProviderUsageRecorder {
+
+        @Override
+        public void recordSuccess(String provider) {
+        }
+
+        @Override
+        public void recordFailure(String provider, ProviderErrorCode code, String message) {
+        }
+
+        @Override
+        public ProviderUsage today(String provider, RateLimitStatus rateLimit) {
+            return new ProviderUsage(0, 0, 0, null, null, null, rateLimit);
+        }
     }
 }

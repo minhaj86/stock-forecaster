@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { formatCompact, formatCurrency, formatDate, formatPercent, formatSignedCurrency, greeting } from './format';
+import {
+  formatCompact, formatCurrency, formatDate, formatDuration, formatInteger, formatPercent, formatSignedCurrency, greeting,
+} from './format';
 
 describe('format', () => {
   it('formats signed percentages from ratios', () => {
@@ -23,6 +25,23 @@ describe('format', () => {
 
   it('formats large numbers compactly', () => {
     expect(formatCompact(12_500_000)).toBe('12.5M');
+  });
+
+  it('formats counts as grouped whole numbers', () => {
+    expect(formatInteger(1258)).toBe('1,258');
+    expect(formatInteger(0)).toBe('0');
+    expect(formatInteger(null)).toBe('—');
+  });
+
+  it('formats durations in the largest sensible units', () => {
+    expect(formatDuration(850)).toBe('850 ms');
+    expect(formatDuration(12_430)).toBe('12.4 s');
+    expect(formatDuration(59_970)).toBe('1 min');
+    expect(formatDuration(252_000)).toBe('4 min 12 s');
+    expect(formatDuration(7_500_000)).toBe('2 h 5 min');
+    expect(formatDuration(3_600_000)).toBe('1 h');
+    expect(formatDuration(null)).toBe('—');
+    expect(formatDuration(-1)).toBe('—');
   });
 
   it('greets by time of day', () => {

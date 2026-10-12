@@ -5,18 +5,26 @@ import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
+import ListSubheader from '@mui/material/ListSubheader';
 import { NavLink, useLocation } from 'react-router';
+import { useAuth } from '@/features/auth/authContext';
 import { BrandMark } from './BrandMark';
-import { PRIMARY_NAV, SECONDARY_NAV, type NavItem } from './navigation';
+import { ADMIN_NAV, PRIMARY_NAV, SECONDARY_NAV, type NavItem } from './navigation';
+
+function isSelected(item: NavItem, pathname: string): boolean {
+  if (pathname === item.to) return true;
+  return !item.exact && pathname.startsWith(`${item.to}/`);
+}
 
 function NavEntry({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
   const location = useLocation();
-  const selected = location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
+  const selected = isSelected(item, location.pathname);
   const Icon = item.icon;
   return (
     <ListItemButton
       component={NavLink}
       to={item.to}
+      end={item.exact}
       selected={selected}
       onClick={onNavigate}
       aria-current={selected ? 'page' : undefined}
@@ -30,14 +38,31 @@ function NavEntry({ item, onNavigate }: { item: NavItem; onNavigate?: () => void
 }
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  const { user } = useAuth();
   return (
     <Box component="nav" aria-label="Main navigation" sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Box sx={{ px: 3, py: 2.25 }}>
         <BrandMark />
       </Box>
-      <List sx={{ flexGrow: 1, pt: 1 }}>
+      <List sx={{ pt: 1 }}>
         {PRIMARY_NAV.map((item) => <NavEntry key={item.to} item={item} onNavigate={onNavigate} />)}
       </List>
+      {user?.role === 'ADMIN' && (
+        <>
+          <Divider sx={{ mx: 1.5 }} />
+          <ListSubheader component="div" disableSticky
+            sx={{
+              bgcolor: 'transparent', lineHeight: 2.5, mt: 1, px: 3, fontSize: '0.72rem', fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+            }}>
+            Admin
+          </ListSubheader>
+          <List aria-label="Administration" sx={{ pt: 0 }}>
+            {ADMIN_NAV.map((item) => <NavEntry key={item.to} item={item} onNavigate={onNavigate} />)}
+          </List>
+        </>
+      )}
+      <Box sx={{ flexGrow: 1 }} />
       <Divider />
       <List>
         {SECONDARY_NAV.map((item) => <NavEntry key={item.to} item={item} onNavigate={onNavigate} />)}

@@ -22,4 +22,14 @@ public interface RefreshTokenRepository {
      * @return number of tokens revoked
      */
     int revokeFamily(UUID familyId, RevocationReason reason, Instant revokedAt);
+
+    /**
+     * Revokes every still-active token of every session of a user (signs the user out everywhere).
+     *
+     * @return number of tokens revoked
+     */
+    int revokeAllOfUser(UUID userId, RevocationReason reason, Instant revokedAt);
+
+    /** Removes all tokens of a user that is being deleted. */
+    void deleteAllByUserId(UUID userId);
 }

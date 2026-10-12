@@ -1,5 +1,6 @@
 package com.stockforecast.identity.infrastructure.bootstrap;
 
+import com.stockforecast.identity.AccountStatus;
 import com.stockforecast.identity.Role;
 import com.stockforecast.identity.application.RegistrationService;
 import com.stockforecast.identity.domain.EmailAddress;
@@ -35,8 +36,10 @@ class BootstrapAdminInitializer implements ApplicationRunner {
         }
         EmailAddress email = EmailAddress.of(properties.email());
         try {
-            registrationService.createAccount(email, properties.password(), properties.displayName(), Role.ADMIN);
-            log.info("Bootstrap administrator account created for {}", email);
+            registrationService.createAccount(email, properties.password(), properties.displayName(), Role.ADMIN,
+                    AccountStatus.ACTIVE, properties.requirePasswordChange());
+            log.info("Bootstrap administrator account created for {}{}", email,
+                    properties.requirePasswordChange() ? " (a new password must be chosen at the first sign-in)" : "");
         } catch (EmailAlreadyRegisteredException | DataIntegrityViolationException e) {
             log.info("Bootstrap administrator {} already exists; leaving it unchanged", email);
         }

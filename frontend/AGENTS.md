@@ -16,13 +16,14 @@ src/
 ├── app/            providers/ (query client, notifications, AppProviders), router/ (routes, lazyPages, guards,
 │                   error pages), layout/ (AppShell, Sidebar, TopBar parts, DemoDataBanner)
 ├── api/            httpClient.ts (Axios + auth), apiError.ts, <area>Api.ts per backend area, queryKeys.ts
-├── features/       auth · dashboard · watchlist · stocks · profile · compare · forecast · ai
+├── features/       auth · dashboard · watchlist · stocks · profile · compare · forecast · ai · admin
 ├── components/     charts/ (EChart, LazyEChart, echarts registration, useChartTheme) · tables/ · forms/ · common/
 ├── hooks/          useDebouncedValue, useSort
 ├── models/         TypeScript mirrors of backend DTOs
 ├── theme/          createAppTheme (light/dark), ColorModeProvider (preference in localStorage)
 ├── utils/          format.ts (all number/date formatting)
-└── test/           setup.tsx, server.ts, handlers.ts (MSW defaults), fixtures.ts, renderApp.tsx
+└── test/           setup.tsx, server.ts, http.ts (api()/apiError()), handlers.ts + adminHandlers.ts (MSW
+                    defaults), fixtures.ts + adminFixtures.ts, signInAsAdmin.ts, renderApp.tsx
 ```
 
 Put code in the feature that owns it. Only genuinely shared pieces go to `components/`, `hooks/` or `utils/`.
@@ -56,8 +57,12 @@ hooks in `features/<feature>/hooks.ts` (TanStack Query) → components.
   anonymous visitors is expected).
 - `features/auth/AuthProvider.tsx` owns the auth state; components use `useAuth()` from `authContext.ts`.
 - Routing after authentication is owned by the guards (`app/router/guards.tsx`): `ProtectedRoute` sends anonymous
-  users to `/login` with `state.from`; `PublicOnlyRoute` sends signed-in users back to `from` (or the dashboard).
-  **Pages must not navigate after login or registration themselves.**
+  users to `/login` with `state.from` and users with `passwordChangeRequired` to `/change-password`;
+  `PublicOnlyRoute` sends signed-in users back to `from` (or the dashboard); `PasswordChangeRoute` moves users on once
+  the password was changed. **Pages must not navigate after login, registration or a password change themselves.**
+- Admin pages live under `/app/admin` behind `features/admin/AdminRoute.tsx` (in-shell 403 for non-administrators);
+  the sidebar renders `ADMIN_NAV` only for `role === 'ADMIN'`. This is UX only: the backend authorizes every admin
+  call. Admin API modules are in `api/admin/`, types in `models/admin.ts`, keys under `queryKeys.admin.*`.
 
 ## UI conventions
 
@@ -99,9 +104,11 @@ hooks in `features/<feature>/hooks.ts` (TanStack Query) → components.
 
 - `renderApp(path)` (`test/renderApp.tsx`) renders the real providers, guards, layout and lazy pages in a memory
   router. Prefer it over rendering components in isolation.
-- MSW 3: default handlers in `test/handlers.ts` model a signed-in user with two watchlists. Override per test with
-  `server.use(...)`. Build URLs with `api('/path')` (matches `*/api/v1/path`). Register specific routes
-  (`/stocks/search`) **before** parameterised ones (`/stocks/:symbol`).
+- MSW 3: default handlers in `test/handlers.ts` model a signed-in **regular** user with two watchlists; admin
+  endpoints have defaults in `test/adminHandlers.ts`. Call `signInAsAdmin()` (`test/signInAsAdmin.ts`) to start as an
+  administrator. Override per test with `server.use(...)`. Build URLs with `api('/path')` (`test/http.ts`, matches
+  `*/api/v1/path`). Register specific routes (`/stocks/search`, `/admin/stocks/provider-search`) **before**
+  parameterised ones (`/stocks/:symbol`).
 - Unhandled requests fail the test (`server.listen({ onUnhandledFrame: 'error' })`; MSW 3 renamed
   `onUnhandledRequest`).
 - `components/charts/EChart` is mocked in `test/setup.tsx` (jsdom has no canvas) and renders

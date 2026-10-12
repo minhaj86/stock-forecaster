@@ -7,21 +7,21 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 /**
- * Catches up after downtime without delaying startup. Goes through the job's proxy so the ShedLock lock applies.
+ * Catches up after downtime without delaying startup. Goes through the scheduler's proxy so the ShedLock lock applies.
  */
 @Component
 @ConditionalOnProperty(prefix = "app.market-data.sync", name = "on-startup", havingValue = "true", matchIfMissing = true)
 class StartupCatchUp {
 
-    private final MarketDataSyncJob job;
+    private final ScheduledMarketDataSync scheduledSync;
 
-    StartupCatchUp(MarketDataSyncJob job) {
-        this.job = job;
+    StartupCatchUp(ScheduledMarketDataSync scheduledSync) {
+        this.scheduledSync = scheduledSync;
     }
 
     @Async
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
-        job.syncWatchedStocks();
+        scheduledSync.queueWatchedStocks();
     }
 }

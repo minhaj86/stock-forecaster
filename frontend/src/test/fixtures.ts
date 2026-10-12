@@ -13,7 +13,7 @@ export function session(overrides: Partial<AuthResponse> = {}): AuthResponse {
     tokenType: 'Bearer',
     expiresIn: 900,
     expiresAt: '2026-10-11T13:15:00Z',
-    user: { id: USER_ID, email: 'ada@example.com', role: 'USER' },
+    user: { id: USER_ID, email: 'ada@example.com', role: 'USER', passwordChangeRequired: false },
     ...overrides,
   };
 }

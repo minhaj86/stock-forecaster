@@ -1,6 +1,8 @@
 package com.stockforecast.watchlist;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -20,4 +22,7 @@ public interface WatchlistQueries {
     Optional<List<UUID>> findStockIds(UUID userId, UUID watchlistId);
 
     int countWatchlists(UUID userId);
+
+    /** Number of distinct users watching each stock; stocks nobody watches are absent. */
+    Map<UUID, Long> countWatchers(Collection<UUID> stockIds);
 }

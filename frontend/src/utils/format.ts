@@ -32,6 +32,27 @@ export function formatNumber(value: number | null | undefined, digits = 2): stri
   return new Intl.NumberFormat(locale(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 }
 
+/** Whole numbers with grouping, e.g. record counts ("1,258"). */
+export function formatInteger(value: number | null | undefined): string {
+  return formatNumber(value, 0);
+}
+
+/** Elapsed time in the largest sensible units: "850 ms", "12.4 s", "4 min 12 s", "2 h 5 min". */
+export function formatDuration(milliseconds: number | null | undefined): string {
+  if (milliseconds === null || milliseconds === undefined || Number.isNaN(milliseconds) || milliseconds < 0) {
+    return PLACEHOLDER;
+  }
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  const tenthsOfSeconds = Math.round(milliseconds / 100) / 10;
+  if (tenthsOfSeconds < 60) return `${formatNumber(tenthsOfSeconds, 1)} s`;
+  const totalSeconds = Math.round(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+  return seconds > 0 ? `${minutes} min ${seconds} s` : `${minutes} min`;
+}
+
 export function formatCompact(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return PLACEHOLDER;
   return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(value);

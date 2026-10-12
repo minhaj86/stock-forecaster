@@ -27,4 +27,17 @@ interface SpringDataRefreshTokenRepository extends Repository<RefreshToken, UUID
                set t.revokedAt = :revokedAt, t.revocationReason = :reason, t.version = t.version + 1
              where t.familyId = :familyId and t.revokedAt is null""")
     int revokeFamily(UUID familyId, RevocationReason reason, Instant revokedAt);
+
+    @Override
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update RefreshToken t
+               set t.revokedAt = :revokedAt, t.revocationReason = :reason, t.version = t.version + 1
+             where t.userId = :userId and t.revokedAt is null""")
+    int revokeAllOfUser(UUID userId, RevocationReason reason, Instant revokedAt);
+
+    @Override
+    @Modifying(flushAutomatically = true)
+    @Query("delete from RefreshToken t where t.userId = :userId")
+    void deleteAllByUserId(UUID userId);
 }

@@ -56,6 +56,21 @@ describe('LoginPage', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
   });
 
+  it.each([
+    ['ACCOUNT_LOCKED', 'This account is locked. Contact an administrator.'],
+    ['ACCOUNT_DISABLED', 'This account has been disabled'],
+  ])('explains a %s account with the backend message', async (code, message) => {
+    signedOut();
+    server.use(http.post(api('/auth/login'), () => apiError(403, code, message)));
+    const { user } = renderApp('/login');
+
+    await user.type(await screen.findByLabelText('Email'), 'carol@example.com');
+    await user.type(screen.getByLabelText('Password'), 'correct-horse-battery-staple');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+  });
+
   it('offers a password-reset placeholder', async () => {
     signedOut();
     const { user } = renderApp('/login');

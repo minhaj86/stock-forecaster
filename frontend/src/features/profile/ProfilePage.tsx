@@ -17,6 +17,7 @@ import { ErrorState } from '@/components/common/ErrorState';
 import { PageHeader } from '@/components/common/PageHeader';
 import { CardGridSkeleton } from '@/components/common/Skeletons';
 import { FormTextField } from '@/components/forms/FormTextField';
+import { ChangePasswordForm } from '@/features/auth/ChangePasswordForm';
 import { formatDate } from '@/utils/format';
 import { useCurrentUserProfile, useUpdateProfile } from './hooks';
 
@@ -95,6 +96,19 @@ export default function ProfilePage() {
                 </Stack>
               </CardContent>
             </Card>
+            <Card component="section" aria-labelledby="password-heading" sx={{ mt: 3 }}>
+              <CardContent>
+                <Typography id="password-heading" variant="h6" component="h2">Change password</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+                  Changing your password signs you out on all other devices.
+                </Typography>
+                <ChangePasswordForm
+                  currentPasswordLabel="Current password"
+                  submitLabel="Change password"
+                  onChanged={() => notify({ message: 'Password changed. Your other sessions have been signed out.' })}
+                />
+              </CardContent>
+            </Card>
           </Grid>
           <Grid size={{ xs: 12, md: 5 }}>
             <Card>
@@ -108,7 +122,7 @@ export default function ProfilePage() {
               </CardContent>
             </Card>
             <Alert severity="info" variant="outlined" sx={{ mt: 2 }}>
-              Changing your email address or password is not available yet.
+              Changing your email address is not available yet.
             </Alert>
           </Grid>
         </Grid>

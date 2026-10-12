@@ -13,8 +13,10 @@ docker compose up -d --build              # postgres :5433, redis :6379, backend
 docker compose ps                         # wait for "healthy"
 ```
 
-Open http://localhost:3000. There are **no built-in user accounts**: register on the sign-in page ("Create one").
-To get an administrator, set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` and run `docker compose up -d backend`.
+Open http://localhost:3000. A `.env` copied from `.env.example` bootstraps a dummy local administrator on the first
+start: `admin@example.com` / `StockLens-Admin-2026` (no forced password change; local only). Regular users register
+on the sign-in page ("Create one"). Another administrator: change `ADMIN_EMAIL`/`ADMIN_PASSWORD` in `.env` and run
+`docker compose up -d backend` (existing accounts are never modified).
 
 Development loop with hot reload instead of containers for the apps:
 

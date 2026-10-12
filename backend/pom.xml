@@ -23,6 +23,8 @@
         <springdoc.version>3.1.1</springdoc.version>
         <shedlock.version>7.10.1</shedlock.version>
         <hipparchus.version>4.0.3</hipparchus.version>
+        <bucket4j.version>8.21.0</bucket4j.version>
+        <wiremock.version>3.13.2</wiremock.version>
         <!-- Overridden by coverage/profiling agents if needed; referenced via @{argLine}. -->
         <argLine/>
     </properties>
@@ -104,6 +106,17 @@
             <version>${shedlock.version}</version>
         </dependency>
 
+        <!-- Market-data provider adapters: HTTP client with timeouts and a token-bucket rate limiter per provider -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-restclient</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j_jdk17-core</artifactId>
+            <version>${bucket4j.version}</version>
+        </dependency>
+
         <!-- Numerical methods for forecasting: regression, optimisation, distributions (maintained Commons Math fork) -->
         <dependency>
             <groupId>org.hipparchus</groupId>
@@ -178,6 +191,13 @@
         <dependency>
             <groupId>org.springframework.modulith</groupId>
             <artifactId>spring-modulith-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- HTTP stubs for provider adapters (no real market-data APIs in tests); standalone = shaded Jetty/Jackson -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>${wiremock.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

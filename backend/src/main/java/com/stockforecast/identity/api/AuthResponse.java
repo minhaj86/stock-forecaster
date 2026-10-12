@@ -21,7 +21,7 @@ record AuthResponse(String accessToken, String tokenType, long expiresIn, Instan
         Duration remaining = Duration.between(now, expiresAt);
         long expiresIn = remaining.isNegative() ? 0 : remaining.plusMillis(999).toSeconds();
         return new AuthResponse(result.accessToken().value(), "Bearer", expiresIn, expiresAt,
-                UserSummary.from(result.user()));
+                UserSummary.from(result.user(), result.passwordChangeRequired()));
     }
 
     @Override
@@ -29,10 +29,14 @@ record AuthResponse(String accessToken, String tokenType, long expiresIn, Instan
         return "AuthResponse[accessToken=***, expiresAt=" + expiresAt + ", user=" + user + "]";
     }
 
-    record UserSummary(UUID id, String email, Role role) {
+    /**
+     * @param passwordChangeRequired the user signed in with a temporary password and must choose a new one
+     *                               ({@code POST /api/v1/auth/password}) before anything else
+     */
+    record UserSummary(UUID id, String email, Role role, boolean passwordChangeRequired) {
 
-        static UserSummary from(AuthenticatedUser user) {
-            return new UserSummary(user.id(), user.email(), user.role());
+        static UserSummary from(AuthenticatedUser user, boolean passwordChangeRequired) {
+            return new UserSummary(user.id(), user.email(), user.role(), passwordChangeRequired);
         }
     }
 }

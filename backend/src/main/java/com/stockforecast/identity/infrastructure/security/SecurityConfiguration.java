@@ -24,16 +24,21 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  *     <li>CSRF protection is disabled because no ambient credential authorizes API calls: bearer tokens are
  *     attached explicitly by the client, and the refresh cookie is SameSite=Strict and only accepted by
  *     endpoints whose effect is to (re)issue tokens to the caller itself.</li>
- *     <li>Deny by default: anything not explicitly public requires authentication; admin paths require
- *     {@code ADMIN} here and again via method security (defence in depth).</li>
+ *     <li>Deny by default: anything not explicitly public requires authentication; admin paths require an
+ *     {@code ADMIN} token whose account is still an active administrator in the database, and again method security
+ *     (defence in depth).</li>
+ *     <li>A user who signed in with a temporary password may only read the profile until the password is changed
+ *     ({@code POST /api/v1/auth/password}); other requests get 403 {@code PASSWORD_CHANGE_REQUIRED}.</li>
  * </ul>
  */
 @Configuration(proxyBeanMethods = false)
 @EnableMethodSecurity
 class SecurityConfiguration {
 
+    /** Authenticated by credentials or the refresh cookie (never by bearer tokens). */
     static final String[] PUBLIC_AUTH_ENDPOINTS = {
-            "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout"};
+            "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout",
+            "/api/v1/auth/password"};
 
     private static final RequestMatcher AUTH_ENDPOINTS =
             PathPatternRequestMatcher.withDefaults().matcher("/api/v1/auth/**");
@@ -41,7 +46,8 @@ class SecurityConfiguration {
     @Bean
     SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, AuthenticatedUserJwtConverter jwtConverter,
                                                ApiAuthenticationEntryPoint authenticationEntryPoint,
-                                               ApiAccessDeniedHandler accessDeniedHandler) {
+                                               ApiAccessDeniedHandler accessDeniedHandler,
+                                               AccessPolicies accessPolicies) {
         http
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
@@ -58,8 +64,10 @@ class SecurityConfiguration {
                         .requestMatchers("/v3/api-docs", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**")
                         .permitAll()
                         .requestMatchers("/error", "/.well-known/oauth-protected-resource").permitAll()
-                        .requestMatchers("/api/v1/admin/**", "/actuator/**").hasRole("ADMIN")
-                        .anyRequest().authenticated())
+                        .requestMatchers("/api/v1/admin/**").access(accessPolicies.activeAdministrator())
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users/me").authenticated()
+                        .anyRequest().access(accessPolicies.authenticatedWithoutPendingPasswordChange()))
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .bearerTokenResolver(bearerTokenResolver())
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtConverter))

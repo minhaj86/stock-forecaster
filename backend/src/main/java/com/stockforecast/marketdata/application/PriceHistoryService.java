@@ -3,7 +3,6 @@ package com.stockforecast.marketdata.application;
 import com.stockforecast.marketdata.DailyBar;
 import com.stockforecast.marketdata.MarketDataStatus;
 import com.stockforecast.marketdata.PriceHistory;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -19,9 +18,9 @@ class PriceHistoryService implements PriceHistory {
     private static final LocalDate FAR_FUTURE = LocalDate.of(9999, 12, 31);
 
     private final MarketDataStore store;
-    private final ObjectProvider<MarketDataProvider> provider;
+    private final MarketDataProvider provider;
 
-    PriceHistoryService(MarketDataStore store, ObjectProvider<MarketDataProvider> provider) {
+    PriceHistoryService(MarketDataStore store, MarketDataProvider provider) {
         this.store = store;
         this.provider = provider;
     }
@@ -45,6 +44,6 @@ class PriceHistoryService implements PriceHistory {
 
     @Override
     public ProviderInfo activeProvider() {
-        return provider.getObject().info();
+        return provider.info();
     }
 }

@@ -1,12 +1,9 @@
 import { http, HttpResponse } from 'msw';
+import { adminHandlers } from './adminHandlers';
 import * as fixtures from './fixtures';
+import { api, apiError } from './http';
 
-/** Absolute pattern for an API path, matching any origin. */
-export const api = (path: string) => `*/api/v1${path}`;
-
-export function apiError(status: number, code: string, message: string, extra: Record<string, unknown> = {}) {
-  return HttpResponse.json({ timestamp: '2026-10-11T13:00:00Z', status, code, message, correlationId: 'corr-123', ...extra }, { status });
-}
+export { api, apiError };
 
 /** A signed-in user with two watchlists and synthetic market data. Tests override individual endpoints. */
 export const defaultHandlers = [
@@ -14,6 +11,7 @@ export const defaultHandlers = [
   http.post(api('/auth/login'), () => HttpResponse.json(fixtures.session())),
   http.post(api('/auth/register'), () => HttpResponse.json(fixtures.session(), { status: 201 })),
   http.post(api('/auth/logout'), () => new HttpResponse(null, { status: 204 })),
+  http.post(api('/auth/password'), () => HttpResponse.json(fixtures.session({ accessToken: 'access-token-2' }))),
   http.get(api('/users/me'), () => HttpResponse.json(fixtures.profile)),
   http.get(api('/market-data/provider'), () => HttpResponse.json({
     id: 'synthetic', name: 'Synthetic demo data', synthetic: true,
@@ -55,4 +53,6 @@ export const defaultHandlers = [
     const stock = fixtures.stocks[String(params.symbol)];
     return stock ? HttpResponse.json(stock) : apiError(404, 'STOCK_NOT_FOUND', `No stock with symbol '${params.symbol}' is available`);
   }),
+  // Admin console endpoints (only reachable with an ADMIN session, see `signInAsAdmin`).
+  ...adminHandlers,
 ];

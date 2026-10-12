@@ -1,6 +1,7 @@
 package com.stockforecast.identity.application;
 
 import com.stockforecast.identity.domain.AccountDisabledException;
+import com.stockforecast.identity.domain.AccountLockedException;
 import com.stockforecast.identity.domain.EmailAddress;
 import com.stockforecast.identity.domain.InvalidCredentialsException;
 import com.stockforecast.identity.domain.PasswordPolicy;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,12 +52,19 @@ public class AuthenticationService {
         if (!passwordEncoder.matches(password, account.getPasswordHash())) {
             throw new InvalidCredentialsException();
         }
-        if (!account.isEnabled()) {
-            throw new AccountDisabledException();
+        // Status is only revealed after a correct password, so it cannot be probed for arbitrary e-mails.
+        switch (account.getStatus()) {
+            case DISABLED -> throw new AccountDisabledException();
+            case LOCKED -> throw new AccountLockedException();
+            case ACTIVE -> {
+                // may sign in
+            }
         }
+        Instant now = clock.instant();
         if (passwordEncoder.upgradeEncoding(account.getPasswordHash())) {
-            account.changePasswordHash(passwordEncoder.encode(password), clock.instant());
+            account.changePasswordHash(passwordEncoder.encode(password), now);
         }
+        account.recordLogin(now);
         return sessions.start(account, command.rememberMe());
     }
 }

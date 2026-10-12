@@ -17,9 +17,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -119,8 +120,11 @@ class StockApiIT {
 
     @Test
     void everyCatalogueEntryHasCompleteReferenceData() throws Exception {
+        // The seeded catalogue has 68 entries; administrators (and other tests sharing the database) may add more.
         mockMvc.perform(get("/api/v1/stocks").param("size", "100").header(HttpHeaders.AUTHORIZATION, session.bearer()))
-                .andExpect(jsonPath("$.page.totalElements", is(68)))
-                .andExpect(jsonPath("$.content[*].currency", everyItem(is("USD"))));
+                .andExpect(jsonPath("$.page.totalElements", greaterThanOrEqualTo(68)))
+                .andExpect(jsonPath("$.content[*].currency", everyItem(matchesPattern("[A-Z]{3}"))))
+                .andExpect(jsonPath("$.content[*].mic", everyItem(matchesPattern("[A-Z0-9]{4}"))))
+                .andExpect(jsonPath("$.content[*].country", everyItem(matchesPattern("[A-Z]{2}"))));
     }
 }

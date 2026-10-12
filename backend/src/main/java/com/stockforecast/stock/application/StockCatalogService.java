@@ -55,6 +55,12 @@ public class StockCatalogService implements StockCatalog {
         return ids.isEmpty() ? List.of() : stocks.findAllByIdIn(ids).stream().map(Stock::toRef).toList();
     }
 
+    @Override
+    public List<StockRef> findAllActiveByIds(Collection<UUID> ids) {
+        return ids.isEmpty() ? List.of()
+                : stocks.findAllByIdIn(ids).stream().filter(Stock::isActive).map(Stock::toRef).toList();
+    }
+
     /**
      * Ranked type-ahead search over symbols, company names and aliases (cached: the catalogue changes rarely and
      * the same prefixes are requested constantly).

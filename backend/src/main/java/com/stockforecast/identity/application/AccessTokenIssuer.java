@@ -9,5 +9,13 @@ import java.time.Instant;
  */
 public interface AccessTokenIssuer {
 
-    IssuedAccessToken issue(AuthenticatedUser user, Instant issuedAt);
+    /**
+     * @param passwordChangeRequired the token only grants access to the password change until the user picks a
+     *                               new password
+     */
+    IssuedAccessToken issue(AuthenticatedUser user, boolean passwordChangeRequired, Instant issuedAt);
+
+    default IssuedAccessToken issue(AuthenticatedUser user, Instant issuedAt) {
+        return issue(user, false, issuedAt);
+    }
 }

@@ -22,6 +22,6 @@ import java.lang.annotation.Target;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import({PostgresTestcontainersConfiguration.class, RedisTestcontainersConfiguration.class, AuthTestClient.class,
-        WatchlistTestClient.class})
+        WatchlistTestClient.class, AdminTestClient.class})
 public @interface IntegrationTest {
 }

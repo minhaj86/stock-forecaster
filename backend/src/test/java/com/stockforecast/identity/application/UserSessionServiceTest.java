@@ -23,6 +23,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
@@ -52,9 +53,9 @@ class UserSessionServiceTest {
     @BeforeEach
     void stubCollaborators() {
         lenient().when(refreshTokens.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        lenient().when(accessTokenIssuer.issue(any(), any()))
+        lenient().when(accessTokenIssuer.issue(any(), anyBoolean(), any()))
                 .thenAnswer(invocation -> new IssuedAccessToken("access-token",
-                        invocation.<Instant>getArgument(1).plus(Duration.ofMinutes(15))));
+                        invocation.<Instant>getArgument(2).plus(Duration.ofMinutes(15))));
     }
 
     @Test

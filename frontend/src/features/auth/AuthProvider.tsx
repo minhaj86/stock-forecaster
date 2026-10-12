@@ -1,8 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { toApiError } from '@/api/apiError';
 import { authApi } from '@/api/authApi';
 import { onSessionEvent } from '@/api/httpClient';
-import type { LoginRequest, RegisterRequest, UserSummary } from '@/models/auth';
+import type { ChangePasswordRequest, LoginRequest, RegisterRequest, UserSummary } from '@/models/auth';
 import { AuthContext, type AuthContextValue, type AuthStatus } from './authContext';
 
 interface AuthState {
@@ -54,6 +55,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: 'authenticated', user: session.user, sessionExpired: false });
   }, [queryClient]);
 
+  // Same identity, so cached server state stays; the guards react to the cleared `passwordChangeRequired` flag.
+  const changePassword = useCallback(async (request: ChangePasswordRequest) => {
+    try {
+      const session = await authApi.changePassword(request);
+      setState({ status: 'authenticated', user: session.user, sessionExpired: false });
+    } catch (error) {
+      const apiError = toApiError(error);
+      if (apiError.status === 401) {
+        // The refresh session behind this tab has ended: the user has to sign in again.
+        queryClient.clear();
+        setState({ status: 'unauthenticated', user: null, sessionExpired: true });
+      }
+      throw apiError;
+    }
+  }, [queryClient]);
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
@@ -64,8 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: 'unauthenticated', user: null, sessionExpired: false });
   }, [queryClient]);
 
-  const value = useMemo<AuthContextValue>(() => ({ ...state, login, register, logout }),
-    [state, login, register, logout]);
+  const value = useMemo<AuthContextValue>(() => ({ ...state, login, register, changePassword, logout }),
+    [state, login, register, changePassword, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

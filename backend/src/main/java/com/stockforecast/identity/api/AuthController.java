@@ -2,6 +2,7 @@ package com.stockforecast.identity.api;
 
 import com.stockforecast.identity.application.AuthenticationResult;
 import com.stockforecast.identity.application.AuthenticationService;
+import com.stockforecast.identity.application.PasswordChangeService;
 import com.stockforecast.identity.application.RegistrationService;
 import com.stockforecast.identity.application.UserSessionService;
 import com.stockforecast.identity.domain.InvalidRefreshTokenException;
@@ -35,14 +36,17 @@ class AuthController {
     private final RegistrationService registrationService;
     private final AuthenticationService authenticationService;
     private final UserSessionService sessionService;
+    private final PasswordChangeService passwordChangeService;
     private final RefreshTokenCookies cookies;
     private final Clock clock;
 
     AuthController(RegistrationService registrationService, AuthenticationService authenticationService,
-                   UserSessionService sessionService, RefreshTokenCookies cookies, Clock clock) {
+                   UserSessionService sessionService, PasswordChangeService passwordChangeService,
+                   RefreshTokenCookies cookies, Clock clock) {
         this.registrationService = registrationService;
         this.authenticationService = authenticationService;
         this.sessionService = sessionService;
+        this.passwordChangeService = passwordChangeService;
         this.cookies = cookies;
         this.clock = clock;
     }
@@ -76,6 +80,23 @@ class AuthController {
     ResponseEntity<AuthResponse> refresh(HttpServletRequest request) {
         String refreshToken = cookies.read(request).orElseThrow(InvalidRefreshTokenException::new);
         return authenticated(ResponseEntity.ok(), sessionService.refresh(refreshToken));
+    }
+
+    @Operation(summary = "Change the password of the signed-in user",
+            description = "Authenticated by the refresh token cookie plus the current (or temporary) password. Ends "
+                    + "every session of the user and starts a new one for the caller; also fulfils a forced "
+                    + "password change.")
+    @ApiResponse(responseCode = "200", description = "Password changed; new access token and refresh token cookie")
+    @ApiResponse(responseCode = "400", description = "INVALID_CURRENT_PASSWORD, PASSWORD_POLICY_VIOLATION, "
+            + "PASSWORD_UNCHANGED or VALIDATION_FAILED", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "401", description = "Missing, expired or revoked session",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @PostMapping("/password")
+    ResponseEntity<AuthResponse> changePassword(@Valid @RequestBody ChangePasswordRequest body,
+                                                HttpServletRequest request) {
+        String refreshToken = cookies.read(request).orElseThrow(InvalidRefreshTokenException::new);
+        return authenticated(ResponseEntity.ok(),
+                passwordChangeService.changePassword(refreshToken, body.currentPassword(), body.newPassword()));
     }
 
     @Operation(summary = "Sign out", description = "Revokes the session and clears the refresh token cookie")

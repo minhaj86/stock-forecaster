@@ -18,6 +18,8 @@ class JwtAccessTokenIssuer implements AccessTokenIssuer {
 
     static final String EMAIL_CLAIM = "email";
     static final String ROLES_CLAIM = "roles";
+    /** Present (true) only while the user must replace a temporary password. */
+    static final String PASSWORD_CHANGE_REQUIRED_CLAIM = "password_change_required";
 
     private final JwtEncoder encoder;
     private final JwtProperties properties;
@@ -28,9 +30,9 @@ class JwtAccessTokenIssuer implements AccessTokenIssuer {
     }
 
     @Override
-    public IssuedAccessToken issue(AuthenticatedUser user, Instant issuedAt) {
+    public IssuedAccessToken issue(AuthenticatedUser user, boolean passwordChangeRequired, Instant issuedAt) {
         Instant expiresAt = issuedAt.plus(properties.accessTokenTtl());
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        JwtClaimsSet.Builder builder = JwtClaimsSet.builder()
                 .issuer(properties.issuer())
                 .audience(List.of(properties.audience()))
                 .subject(user.id().toString())
@@ -39,8 +41,11 @@ class JwtAccessTokenIssuer implements AccessTokenIssuer {
                 .notBefore(issuedAt)
                 .expiresAt(expiresAt)
                 .claim(EMAIL_CLAIM, user.email())
-                .claim(ROLES_CLAIM, List.of(user.role().name()))
-                .build();
+                .claim(ROLES_CLAIM, List.of(user.role().name()));
+        if (passwordChangeRequired) {
+            builder.claim(PASSWORD_CHANGE_REQUIRED_CLAIM, true);
+        }
+        JwtClaimsSet claims = builder.build();
         JwsHeader header = JwsHeader.with(JwtConfiguration.ALGORITHM).type(JwtConfiguration.ACCESS_TOKEN_TYPE).build();
         String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
         return new IssuedAccessToken(token, expiresAt);

@@ -13,9 +13,17 @@ app:
   market-data:
     provider: synthetic
     sync:
-      # Scheduled and startup synchronisation are exercised explicitly; event-driven backfill stays active.
+      # Scheduled and startup synchronisation are exercised explicitly; watchlist-triggered jobs stay active.
       cron: "-"
       on-startup: false
+    jobs:
+      # Jobs start as soon as they are queued (wake-up); the poll only picks up retries quickly.
+      poll-interval: PT0.5S
+      retry-base-delay: PT0.2S
+      retry-max-delay: PT1S
+      max-attempts: 2
+    health:
+      min-refresh-interval: PT0S
 
 logging:
   level:

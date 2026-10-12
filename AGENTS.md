@@ -14,15 +14,17 @@ investment advice.
 - **Frontend**: React 19, TypeScript 6, Vite 8, MUI 9, TanStack Query 5, React Router 8, ECharts 6.
 - **Status**: backend phases 1–4 (auth, stocks & watchlists, market data, analytics), forecasting phases 1–3
   (naive, moving average, linear regression, exponential smoothing; calibrated ranges; walk-forward backtests) with
-  the forecast UI, and frontend phases 1–3 (shell, auth, dashboard, watchlists, search) are done. Next: forecast
-  model comparison & auto selection, Monte Carlo, full stock charts, comparison, AI assistant, a licensed
-  market-data provider, and rate limiting. Compare and AI Assistant pages are deliberately "Coming soon".
+  the forecast UI, frontend phases 1–3 (shell, auth, dashboard, watchlists, search) and the **admin console**
+  (users with safeguards and forced password change, stocks, market-data jobs incl. safe re-population, Twelve Data
+  provider with rate limiting, provider monitoring, audit log) are done. Next: forecast model comparison & auto
+  selection, Monte Carlo, full stock charts, comparison, AI assistant, and Redis-backed rate limiting. Compare and AI
+  Assistant pages are deliberately "Coming soon".
 
 ## Repository map
 
 ```text
 backend/        Spring Boot app (Maven wrapper). Modules under src/main/java/com/stockforecast/:
-                shared · identity · user · stock · watchlist · marketdata · quant · analytics · forecasting
+                shared · identity · user · stock · watchlist · marketdata · quant · analytics · forecasting · admin
 frontend/       React SPA (Vite). src/{app,api,features,components,hooks,models,theme,utils,test}
 docs/           architecture.md: design, trade-offs and roadmap (the source of truth for intended design)
 docker-compose.yml   PostgreSQL, Redis, backend, frontend (nginx); copy .env.example to .env first
@@ -114,7 +116,9 @@ Environment notes:
 - Returning JPA entities from controllers; `catch (Exception)`; empty catch blocks; `RuntimeException` for business
   failures (use a `DomainException` subclass with a code).
 - Accepting `userId` in paths or bodies for user-scoped data.
-- Calling a market-data provider (or any slow external system) during a user request.
+- Calling a market-data provider (or any slow external system) during a user request. The only exceptions are the
+  admin console's provider search/metadata lookup and health check: admin-only, rate limited, time-limited and never
+  inside a database transaction.
 - Raw Axios calls inside components; server data in global client state; `any` in TypeScript.
 - Placeholder `TODO` implementations, unless the feature is explicitly scheduled for a later phase (then say so in
   the UI and docs).

@@ -11,7 +11,16 @@ import java.util.UUID;
  */
 public interface StockRepository {
 
+    Stock save(Stock stock);
+
+    /** Includes inactive stocks. */
     Optional<Stock> findBySymbol(String symbol);
+
+    boolean existsBySymbol(String symbol);
+
+    long count();
+
+    long countByActiveTrue();
 
     Optional<Stock> findById(UUID id);
 

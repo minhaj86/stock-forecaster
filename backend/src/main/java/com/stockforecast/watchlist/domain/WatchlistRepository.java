@@ -1,5 +1,6 @@
 package com.stockforecast.watchlist.domain;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,4 +27,7 @@ public interface WatchlistRepository {
     List<UUID> findAllWatchedStockIds();
 
     List<UUID> findWatchedStockIdsByUserId(UUID userId);
+
+    /** Distinct users watching each of the given stocks (stocks nobody watches are absent). */
+    List<WatcherCount> countWatchersByStockIds(Collection<UUID> stockIds);
 }

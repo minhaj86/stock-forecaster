@@ -1,0 +1,25 @@
+package com.stockforecast.admin.domain;
+
+/**
+ * Audited administrative actions (stable codes, stored and returned by the API).
+ */
+public enum AuditAction {
+    USER_CREATED,
+    USER_UPDATED,
+    USER_ROLE_CHANGED,
+    USER_DISABLED,
+    USER_ENABLED,
+    USER_LOCKED,
+    USER_DELETED,
+    USER_PASSWORD_RESET,
+    STOCK_CREATED,
+    STOCK_DISABLED,
+    STOCK_ENABLED,
+    MARKET_DATA_REFRESH_STARTED,
+    MARKET_DATA_BACKFILL_STARTED,
+    MARKET_DATA_REPOPULATION_STARTED,
+    MARKET_DATA_BULK_LOAD_STARTED,
+    MARKET_DATA_SYNC_TRIGGERED,
+    MARKET_DATA_JOB_RETRIED,
+    MARKET_DATA_JOB_CANCELLED
+}

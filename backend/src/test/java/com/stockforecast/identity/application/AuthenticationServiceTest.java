@@ -1,7 +1,9 @@
 package com.stockforecast.identity.application;
 
+import com.stockforecast.identity.AccountStatus;
 import com.stockforecast.identity.Role;
 import com.stockforecast.identity.domain.AccountDisabledException;
+import com.stockforecast.identity.domain.AccountLockedException;
 import com.stockforecast.identity.domain.EmailAddress;
 import com.stockforecast.identity.domain.InvalidCredentialsException;
 import com.stockforecast.identity.domain.UserAccount;
@@ -117,6 +119,38 @@ class AuthenticationServiceTest {
         assertThatThrownBy(() -> service().login(new LoginCommand("ada@example.com", PASSWORD, true)))
                 .isInstanceOf(AccountDisabledException.class);
         verify(sessions, never()).start(account, true);
+    }
+
+    @Test
+    void lockedAccountsCannotSignInAndAreToldToContactAnAdministrator() {
+        UserAccount account = account(passwordEncoder.encode(PASSWORD));
+        account.changeStatus(AccountStatus.LOCKED, NOW);
+        when(accounts.findByEmail("ada@example.com")).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> service().login(new LoginCommand("ada@example.com", PASSWORD, true)))
+                .isInstanceOf(AccountLockedException.class)
+                .hasMessageContaining("Contact an administrator");
+        verify(sessions, never()).start(account, true);
+    }
+
+    @Test
+    void theAccountStatusIsOnlyRevealedAfterACorrectPassword() {
+        UserAccount account = account(passwordEncoder.encode(PASSWORD));
+        account.changeStatus(AccountStatus.LOCKED, NOW);
+        when(accounts.findByEmail("ada@example.com")).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> service().login(new LoginCommand("ada@example.com", "wrong-password-123", true)))
+                .isInstanceOf(InvalidCredentialsException.class);
+    }
+
+    @Test
+    void successfulSignInsAreRecorded() {
+        UserAccount account = account(passwordEncoder.encode(PASSWORD));
+        when(accounts.findByEmail("ada@example.com")).thenReturn(Optional.of(account));
+
+        service().login(new LoginCommand("ada@example.com", PASSWORD, false));
+
+        assertThat(account.getLastLoginAt()).isEqualTo(NOW);
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.stockforecast.marketdata.api;
 
-import com.stockforecast.marketdata.application.MarketDataSyncService;
-import com.stockforecast.marketdata.application.MarketDataSyncService.SyncOutcome;
+import com.stockforecast.marketdata.application.MarketDataJobService;
 import com.stockforecast.stock.StockCatalog;
 import com.stockforecast.support.AuthTestClient;
 import com.stockforecast.support.AuthTestClient.Session;
@@ -14,9 +13,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Duration;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasSize;
@@ -35,7 +36,7 @@ class MarketDataIT {
     @Autowired
     private WatchlistTestClient watchlists;
     @Autowired
-    private MarketDataSyncService syncService;
+    private MarketDataJobService jobService;
     @Autowired
     private StockCatalog stockCatalog;
     @Autowired
@@ -70,22 +71,40 @@ class MarketDataIT {
     void aStockIsTrackedTheMomentItIsWatched() throws Exception {
         watchlists.addStock(session, watchlists.defaultWatchlistId(session), "PANW");
 
-        // Immediately after the add returns (the backfill may not have started yet) the stock is never "not tracked".
+        // Immediately after the add returns (the job may not have started yet) the stock is never "not tracked".
         mockMvc.perform(get("/api/v1/stocks/PANW/prices").header(HttpHeaders.AUTHORIZATION, session.bearer()))
                 .andExpect(jsonPath("$.dataStatus", anyOf(is("PENDING"), is("READY"))));
     }
 
     @Test
-    void synchronisationIsIdempotent() throws Exception {
+    void watchingQueuesAnInitialLoadAndScheduledSynchronisationIsIdempotent() throws Exception {
         watchlists.addStock(session, watchlists.defaultWatchlistId(session), "INTU");
         watchlists.awaitMarketData(session, "INTU");
         UUID stockId = stockCatalog.getBySymbol("INTU").id();
+        assertThat(countJobs(stockId, "INITIAL_LOAD", "WATCHLIST")).isEqualTo(1);
         Integer before = countBars(stockId);
 
-        assertThat(syncService.syncStock(stockId, true)).isEqualTo(SyncOutcome.UPDATED);
-        assertThat(syncService.syncStock(stockId, true)).isEqualTo(SyncOutcome.UPDATED);
+        for (int run = 1; run <= 2; run++) {
+            jobService.queueScheduledSynchronisation();
+            int expected = run;
+            await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(200)).untilAsserted(() ->
+                    assertThat(countJobs(stockId, "AUTOMATIC_SYNC", "SCHEDULE")).isEqualTo(expected));
+        }
 
         assertThat(countBars(stockId)).isEqualTo(before).isGreaterThan(1200);
+    }
+
+    @Test
+    void watchingAStockWhoseDataIsCurrentQueuesNoFurtherJob() throws Exception {
+        watchlists.addStock(session, watchlists.defaultWatchlistId(session), "CRWD");
+        watchlists.awaitMarketData(session, "CRWD");
+        UUID stockId = stockCatalog.getBySymbol("CRWD").id();
+        Session other = auth.registerNewUser();
+
+        watchlists.addStock(other, watchlists.defaultWatchlistId(other), "CRWD");
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from market_data_sync_jobs where stock_id = ?",
+                Integer.class, stockId)).isEqualTo(1);
     }
 
     @Test
@@ -115,5 +134,12 @@ class MarketDataIT {
     private Integer countBars(UUID stockId) {
         return jdbcTemplate.queryForObject("select count(*) from market_prices where stock_id = ?", Integer.class,
                 stockId);
+    }
+
+    private Integer countJobs(UUID stockId, String type, String trigger) {
+        return jdbcTemplate.queryForObject("""
+                select count(*) from market_data_sync_jobs
+                 where stock_id = ? and job_type = ? and trigger_source = ? and status = 'COMPLETED'""",
+                Integer.class, stockId, type, trigger);
     }
 }

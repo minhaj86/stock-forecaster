@@ -1,8 +1,9 @@
 # Stock Forecast Platform — Architecture & Implementation Plan
 
-> Status: **backend phases 1–4 (foundation, stocks & watchlists, market data, analytics) and frontend phases 1–3
-> (shell, authentication, dashboard, watchlists, search) implemented.** Later phases are designed here and
-> implemented incrementally; ✅ marks what exists today.
+> Status: **backend phases 1–4 (foundation, stocks & watchlists, market data, analytics), forecasting phases 1–3,
+> frontend phases 1–3 (shell, authentication, dashboard, watchlists, search) and the admin console (users, stocks,
+> market-data jobs, Twelve Data provider, audit log) implemented.** Later phases are designed here and implemented
+> incrementally; ✅ marks what exists today.
 > Forecasts and AI-generated analysis are informational only and should not be considered financial advice.
 
 Contents
@@ -49,6 +50,7 @@ flowchart LR
         AN[analytics]
         FC[forecasting]
         AI[ai]
+        ADM["admin<br/>(back office)"]
         NT[notification]
         JOBS["Schedulers + ShedLock"]
     end
@@ -60,7 +62,8 @@ flowchart LR
     OBS["Prometheus · Grafana · OTel"]
 
     UI --> EDGE --> SEC
-    SEC --> ID & USR & STK & WL & AN & FC & AI
+    SEC --> ID & USR & STK & WL & AN & FC & AI & ADM
+    ADM --> ID & USR & STK & MD
     WL --> STK
     WL -- "StockWatched events" --> MD
     JOBS --> MD
@@ -102,14 +105,15 @@ Module dependencies must be acyclic.
 | Module | Responsibility | Owns tables | Published API (examples) | Depends on |
 |---|---|---|---|---|
 | `shared` (open) | Error model, `DomainException`, ids, correlation id, clock, OpenAPI | – | `ApiError`, `DomainException`, `Identifiers` | – |
-| `identity` ✅ | Accounts, credentials, sessions (refresh tokens), JWT, HTTP security | `users`, `refresh_tokens` | `AuthenticatedUser`, `@CurrentUser`, `Role`, `UserRegisteredEvent` | shared |
-| `user` ✅ | Profile and preferences (display name, time zone) | `user_profiles` | – | identity, shared |
-| `stock` ✅ | Canonical securities catalogue, search, metadata | `stocks` | `StockCatalog`, `StockRef`, `UnknownStockException` | shared |
-| `watchlist` ✅ | User watchlists and items, ownership, limits, starter list | `watchlists`, `watchlist_items` | `WatchlistQueries`, `StockAddedToWatchlist` event | identity, stock |
-| `marketdata` ✅ | Provider port/adapters, ingestion, stored price history, sync status | `market_prices`, `market_data_sync_status`, `shedlock` | `PriceHistory`, `DailyBar`, `MarketDataStatus` | stock, watchlist |
+| `identity` ✅ | Accounts (status, forced password change), credentials, sessions (refresh tokens), JWT, HTTP security incl. admin access policy, account administration and its safeguards | `users`, `refresh_tokens` | `AuthenticatedUser`, `@CurrentUser`, `Role`, `AccountStatus`, `UserRegisteredEvent`, `UserAccountDeleted`, `AccountAdministration` (+ `ManagedAccount`, `AccountStatistics`) | shared |
+| `user` ✅ | Profile and preferences (display name, time zone) | `user_profiles` | `UserProfiles` (administrative profile access) | identity, shared |
+| `stock` ✅ | Canonical securities catalogue, search, metadata, administration (registration, activation) | `stocks` | `StockCatalog`, `StockRef`, `UnknownStockException`, `StockAdministration`, `ManagedStock` | shared |
+| `watchlist` ✅ | User watchlists and items, ownership, limits, starter list | `watchlists`, `watchlist_items` | `WatchlistQueries` (incl. watcher counts), `StockAddedToWatchlist` event | identity, stock |
+| `marketdata` ✅ | Provider port/adapters (synthetic, Twelve Data), rate limiting, validation, job queue and worker, stored price history, sync status, provider health and usage | `market_prices`, `market_data_sync_status`, `market_data_sync_jobs`, `market_price_staging`, `market_data_provider_usage`, `shedlock` | `PriceHistory`, `DailyBar`, `MarketDataStatus`, `MarketDataUpdated` event, `MarketDataJobs`, `MarketDataInventory`, `MarketDataProviders` (+ value types) | stock, watchlist |
 | `quant` ✅ | Pure financial math shared by analytics and forecasting (metric definitions, trailing indicators) | – | `PriceSeries`, `NormalizedSeries`, `Indicators` | – |
 | `analytics` ✅ | Returns, risk, momentum, normalised performance, dashboard | – (Redis cache only) | – (REST only) | marketdata, stock, watchlist, identity, quant |
 | `forecasting` ✅ | Forecast model SPI, statistical models, interval calibration, walk-forward backtesting, feature engineering | – (Redis cache only, see §9) | – (REST only; a query API for `ai` comes with phase 8 of the forecasting plan) | marketdata, stock, quant |
+| `admin` ✅ | Operational back office: all `/api/v1/admin/**` endpoints, dashboard, orchestration of the owning modules' administration APIs, audit trail | `admin_audit_events` | – (REST only; nothing depends on it) | identity, user, watchlist, stock, marketdata |
 | `ai` | Grounded Q&A, conversations, LLM port/adapters, cost control | `ai_conversations`, `ai_messages`, `ai_usage_daily` | – | identity, watchlist, stock, analytics, forecasting |
 | `notification` | Future alerts (price thresholds, digests) | `notifications` (future) | – | listens to events |
 
@@ -138,13 +142,16 @@ backend/src/main/java/com/stockforecast
 │   ├── application/              # RegistrationService, AuthenticationService, UserSessionService, ports
 │   ├── infrastructure/
 │   │   ├── persistence/          # Spring Data implementations of the ports
-│   │   ├── security/             # filter chain, JWT encoder/decoder, converters, entry points
-│   │   └── bootstrap/            # first-admin provisioning
-│   └── api/                      # AuthController, AdminUserController, DTOs, refresh cookie
+│   │   ├── security/             # filter chain, access policies (active admin, pending password change), JWT
+│   │   └── bootstrap/            # first-admin provisioning (one-time password)
+│   └── api/                      # AuthController (incl. password change), DTOs, refresh cookie
 ├── user/                         # same layering: domain / application / infrastructure / api
 ├── stock/                        # catalogue, ranked search (Redis-cached)
 ├── watchlist/                    # aggregate with items; published WatchlistQueries + StockAddedToWatchlist
-├── marketdata/                   # provider port, infrastructure/provider/<vendor>/ adapters, JDBC store, ShedLock job
+├── marketdata/                   # provider port, infrastructure/provider/<vendor>/ adapters (synthetic, twelvedata),
+│                                 # job queue + worker, validation, backfill/repopulation, JDBC store, health
+├── admin/                        # back office: admin controllers, dashboard, user/stock/market-data orchestration,
+│                                 # audit log (JDBC, JSONB metadata)
 ├── quant/                        # PriceSeries, Indicators: pure metric definitions shared by analytics & forecasting
 ├── analytics/                    # snapshots, rebased performance, dashboard composition
 ├── forecasting/                  # domain/{model,backtest,feature}: models, walk-forward backtester, features
@@ -194,6 +201,31 @@ market_data_sync_status   stock_id PK, provider, last_bar_date, last_success_at,
                           consecutive_failures, last_error, next_attempt_at (backoff)
 shedlock                  name PK, lock_until, locked_at, locked_by
 ```
+
+### Implemented (admin console, V7–V10)
+
+```text
+users                     status VARCHAR CHECK (ACTIVE|DISABLED|LOCKED) replaces enabled (disabled rows migrated),
+                          password_change_required, last_login_at; IX (role, status)                     (V7)
+refresh_tokens            revocation reasons + PASSWORD_CHANGED, ADMIN_ACTION                            (V7)
+stocks                    + source (CATALOGUE | MANUAL | provider id)                                    (V8)
+market_data_sync_jobs     id UUID PK, job_type, status, trigger_source, stock_id FK, provider, bar_interval (ONE_DAY),
+                          existing_data_strategy, from/to_date, requested_by (no FK), requested/started/completed_at,
+                          heartbeat_at, attempts/max_attempts, next_attempt_at, progress, status_message,
+                          records_fetched/inserted/updated/skipped/failed/deleted, error_code/message, retryable,
+                          retry_of_job_id FK, batch_id, version
+                          partial IX (requested_at) WHERE QUEUED; partial IX (stock_id) WHERE QUEUED|RUNNING  (V9)
+market_price_staging      (job_id FK ON DELETE CASCADE, bar_date) PK + OHLCV — validated data of a running re-population
+market_data_provider_usage (provider, usage_date) PK, requests, failures, rate_limited, last success/failure (+message)
+market_data_sync_status   − sync_started_at, next_attempt_at (concurrency and backoff moved to the job table)
+admin_audit_events        id UUID PK, occurred_at, actor_user_id + actor_email (snapshot, no FK), action, entity_type,
+                          entity_id, summary, metadata JSONB (never secrets), correlation_id
+                          IX occurred_at DESC; (entity_type, entity_id, occurred_at); (action, …); (actor_user_id, …)  (V10)
+```
+
+`market_prices` stays the daily table keyed by `(stock_id, bar_date)` (the interval is implicitly `ONE_DAY`);
+`open/high/low/close` are split-adjusted, `adjusted_close` is split- and dividend-adjusted. First/last stored date,
+bar count and last synchronisation are derived, not stored.
 
 ### Planned
 
@@ -245,12 +277,18 @@ existence disclosure) · OpenAPI at `/v3/api-docs`, Swagger UI at `/swagger-ui.h
 | 1 ✅ | `POST /auth/refresh` · `POST /auth/logout` | rotate session / revoke session (cookie-based) |
 | 1 ✅ | `GET /users/me` · `PATCH /users/me` | own profile |
 | 1 ✅ | `GET /admin/users/statistics` | ADMIN: user counts |
+| 1 ✅ | `POST /auth/password` | change password (cookie + current password); fulfils a forced change |
 | 2 ✅ | `GET /stocks/search?q=apple&limit=8` · `GET /stocks?sector=&page=&size=` · `GET /stocks/sectors` · `GET /stocks/{symbol}` | ranked catalogue search (Redis-cached), browsing |
 | 2 ✅ | `GET/POST /watchlists` · `GET/PATCH/DELETE /watchlists/{id}` | own watchlists (max 20; names unique per user) |
 | 2 ✅ | `POST /watchlists/{id}/items` · `PATCH/DELETE /watchlists/{id}/items/{symbol}` | add/annotate/remove stocks (max 50 per list) |
 | 3 ✅ | `GET /stocks/{symbol}/prices?period=1Y` · `GET /market-data/provider` | stored daily bars with data status; active provider (synthetic flag) |
 | 3 | `POST /stocks/{symbol}/refresh` → `202` | controlled async refresh (deduplicated, rate-limited) |
-| 3 | `GET /admin/market-data/sync-status` · `GET /admin/market-data/providers` | ingestion monitoring |
+| Admin ✅ | `GET /admin/dashboard` · `POST /admin/market-data/synchronize` | operational overview; queue updates for watched stocks |
+| Admin ✅ | `GET/POST /admin/users` · `GET/PATCH/DELETE /admin/users/{id}` · `POST /admin/users/{id}/disable` · `/enable` · `/password-reset` | user administration with safeguards (`LAST_ADMINISTRATOR`, `SELF_ADMINISTRATION_NOT_ALLOWED`) |
+| Admin ✅ | `GET/POST /admin/stocks` · `GET /admin/stocks/{symbol}` · `GET /admin/stocks/provider-search` · `POST /admin/stocks/{symbol}/activate` · `/deactivate` | catalogue administration, provider-first registration |
+| Admin ✅ | `POST /admin/stocks/{symbol}/market-data/update` · `/backfill` · `/repopulate` · `POST /admin/market-data/bulk-load` → `202` + job | asynchronous market-data jobs |
+| Admin ✅ | `GET /admin/market-data/jobs` · `GET /admin/market-data/jobs/{id}` · `POST …/retry` · `POST …/cancel` | job monitoring |
+| Admin ✅ | `GET /admin/market-data/providers` · `GET /admin/market-data/providers/health` · `GET /admin/audit-log` | provider monitoring (never the API key), audit trail |
 | 4 ✅ | `GET /stocks/{symbol}/analytics` · `GET /analytics/snapshots?symbols=` | price, change, 1W–1Y/YTD returns, 30/90-day volatility, 1Y drawdown, RSI(14), 3M momentum |
 | 4 ✅ | `GET /analytics/performance?symbols=&period=` | series rebased to 100 (weekly points for 5Y/MAX) |
 | 4 | `GET /stocks/{symbol}/indicators?period=1Y&sma=20,50,200` | chart overlay series |
@@ -264,55 +302,71 @@ existence disclosure) · OpenAPI at `/v3/api-docs`, Swagger UI at `/swagger-ui.h
 
 ## 7. Market-data ingestion
 
+Implemented ✅ (admin console phases 3–6). Every download is a **job**; the scheduler, users watching new stocks and
+administrators only queue jobs, and one worker executes them — so all paths share one implementation.
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant W as watchlist
-    participant MD as marketdata
-    participant S as SyncJob (ShedLock)
-    participant RL as RateLimiter + Resilience4j
-    participant P as MarketDataProvider adapter
-    participant DB as PostgreSQL
-    participant A as analytics
-    W-->>MD: StockWatched(stockId) [after commit]
-    MD->>MD: upsert tracked_stocks, enqueue backfill
-    S->>DB: tracked stocks whose next_attempt_at <= now
-    loop per batch (provider batch size)
-        S->>DB: missing range = last_bar_date+1 .. today
-        S->>RL: acquire permits (provider quota)
-        RL->>P: getHistoricalPrices(symbols, from, to) [timeout, retry w/ backoff, circuit breaker]
-        P-->>S: provider DTOs → normalised PriceBars
-        S->>DB: INSERT … ON CONFLICT (stock_id, bar_date) DO UPDATE  (idempotent)
-        S->>DB: update market_data_sync_status (success/failure, backoff)
-        S-->>A: MarketDataUpdated(stockId, range) [event registry]
-    end
-    A->>A: evict/precompute cached analytics
+    participant T as Trigger (watchlist · scheduler · admin)
+    participant Q as market_data_sync_jobs
+    participant W as Job worker (ShedLock)
+    participant P as Provider adapter (token bucket)
+    participant V as Validation
+    participant DB as market_prices
+    participant A as analytics / forecasting
+    T->>Q: queue job (dedupe identical active jobs) [same transaction as the trigger]
+    Q-->>W: wake up after commit (or next poll)
+    W->>Q: claim next due job FOR UPDATE SKIP LOCKED (admin > watchlist > schedule; one job per stock)
+    W->>P: fetch range (no transaction, no connection held; waits for rate-limit permits)
+    P-->>W: normalised bars (split-adjusted OHLC + total-return adjusted close)
+    W->>V: validate (instrument, currency, duplicates, OHLC consistency, volume, dates)
+    W->>DB: one short transaction: insert new / update changed bars, record success (data version)
+    W->>Q: COMPLETED | PARTIALLY_COMPLETED | retry with backoff | FAILED
+    W-->>A: MarketDataUpdated [after commit] → caches keyed by data version, analytics recalculated
 ```
 
-* **Port** (`marketdata.application`): `getQuote`, `getHistoricalPrices`, `searchStocks`, plus `capabilities()`
-  (batch size, requests/minute, daily quota). The configured adapter is selected by `MARKET_DATA_PROVIDER`;
-  credentials come from `MARKET_DATA_API_KEY`. First adapter: Twelve Data (batch-capable, workable free tier);
-  Alpha Vantage second. Current plan limits must be verified when implementing.
-* **Only watched stocks are synced.** The job asks the watchlist module (`WatchlistQueries`) for the watched set;
-  `StockAddedToWatchlist` triggers an immediate asynchronous backfill after the watchlist transaction commits, so a
-  freshly added stock has five years of history within seconds. Trade-off: without an event outbox a crash can
-  lose that trigger; the daily (and start-up) synchronisation then catches up.
-* **Concurrency without a held connection**: a short transaction takes a per-stock lease
-  (`sync_started_at`, taken over when stale), the provider is called outside any transaction, and a second short
-  transaction upserts the bars and records success — no DB connection is held during network calls, and two
-  instances never synchronise the same stock at once.
-* **Synthetic provider ✅**: deterministic geometric Brownian motion per symbol for development and demos, released
-  like an end-of-day feed (after 21:00 UTC). It reports `synthetic: true` so every client labels the data as
-  simulated; production must configure a licensed provider.
-* **Rate limits**: Bucket4j token bucket per provider sized from `capabilities()` (Redis-backed in multi-instance
-  deployments) — requests wait for permits instead of failing. **Resilience**: Resilience4j time limiter, retry with
-  exponential backoff + jitter (only for timeouts/5xx/429), circuit breaker per provider, bulkhead.
-* **Idempotency**: natural key upserts; re-running a sync is harmless. Split/dividend adjustments are handled by
-  periodically re-fetching a trailing window and a full refresh when the provider reports corporate actions.
-* **Failures**: per-stock exponential backoff via `next_attempt_at`, structured logs with provider/symbol/error
-  code, metrics `market_data_requests`, `market_data_failures`, `market_data_sync_duration`, `market_data_last_success`.
-* **Manual refresh** enqueues the same pipeline (202 Accepted); duplicates within a cool-down are no-ops.
-* **Intraday** (1D/5D charts) uses a separate retention-limited table once a provider plan supports it.
+* **Port** (`marketdata.application.MarketDataProvider`): `info()`, `capabilities()` (intervals, search, metadata,
+  quotes, bars per request, adjustment), `isConfigured()`, `searchStocks`, `getStockMetadata`,
+  `getHistoricalPrices(instrument, from, to, interval)` returning raw, unvalidated bars, `getLatestQuote`,
+  `checkHealth`. Failures are `MarketDataProviderException` with a normalised `ProviderErrorCode` (transient: timeout,
+  429, 5xx). Adapters: `synthetic` and **Twelve Data** (`infrastructure/provider/twelvedata`: `RestClient` with
+  connect/read timeouts, API key in the `Authorization` header, error bodies detected even with HTTP 200, ranges split
+  into ≤ 5,000-bar requests, `adjust=splits` + `adjust=all`, unfinished sessions withheld until 20:00 exchange time).
+  Selected by `MARKET_DATA_PROVIDER` through a custom condition; DTOs never leave the adapter package.
+* **Jobs**: `INITIAL_LOAD` (watching a stock without data; configured years), `AUTOMATIC_SYNC` (scheduled), and the
+  admin types `LATEST_UPDATE`, `BACKFILL` (`SKIP`/`UPDATE` existing bars) and `REPOPULATE`. Incremental jobs request
+  only dates after the newest stored bar, re-fetching a 5-day correction window; the effective range is recorded on
+  the job. Only watched (or explicitly administered) active stocks are ever downloaded.
+* **Concurrency**: the worker run holds a cluster-wide ShedLock lock (one instance works the queue, so a per-instance
+  token bucket enforces the plan) and claims jobs with `SKIP LOCKED`, never two for the same stock. Provider calls
+  happen outside transactions; a heartbeat lets a lost worker's job be re-queued after 10 minutes.
+* **Rate limits and retries**: Bucket4j token bucket (`requests-per-minute`); callers wait up to `max-wait` for a
+  permit, otherwise the job is deferred without using an attempt. A vendor `429` pauses the bucket for `Retry-After`
+  (or until the next UTC day for daily quotas). Transient failures retry with exponential backoff and jitter
+  (1 min doubling to 1 h, 5 attempts); permanent ones fail immediately. Failed transient jobs can be retried manually
+  (a new job linked by `retry_of_job_id`).
+* **Validation** before anything is stored: response-level checks (instrument, currency, interval, duplicate dates)
+  reject the whole response; bar-level checks (missing/non-positive/implausible prices, `high ≥ open/close/low`,
+  `low ≤ open/close`, volume, date inside the range and not in the future) skip the bar and count it as failed
+  (`PARTIALLY_COMPLETED`). Values are normalised to the stored precision.
+* **Safe re-population**: FETCH → VALIDATE (all bars must be valid) → STAGE (`market_price_staging`) → VERIFY (staged
+  count and range) → one transaction that deletes stored bars missing from the stage, upserts changed/new bars within
+  the span the provider actually covered, removes the stage and records the new data version. A provider failure,
+  invalid data or an empty answer for a range with data leaves `market_prices` untouched.
+* **Invalidation**: every successful job records the data version (`last_success_at`), which keys analytics and
+  forecast/backtest caches, so new or replaced data makes old results unreachable; `MarketDataUpdated` (after commit)
+  lets analytics recalculate the stock's snapshot. Adjusted closes that change for already stored dates are detected
+  and reported ("re-populate recommended").
+* **Observability**: provider usage per day in `market_data_provider_usage` (all instances), health (active check
+  cached 60 s, otherwise derived from the latest request outcome), metrics `market_data_sync_jobs_total`,
+  `market_data_sync_failures_total`, `market_data_records_downloaded_total`, `market_data_records_updated_total`,
+  `market_data_sync_duration_seconds`, `market_data_provider_requests_total`, `market_data_provider_errors_total`,
+  `market_data_provider_rate_limit_total`, and MDC fields `jobId`, `stockSymbol`, `provider`, `operation`.
+* **Synthetic provider**: deterministic geometric Brownian motion per symbol for development and demos, released like
+  an end-of-day feed (after 21:00 UTC); it reports `synthetic: true` so every client labels the data as simulated.
+* **Next**: Redis-backed token bucket for interactive calls on many instances, circuit breaker, market-data deletion,
+  intraday bars in a separate retention-limited table, provider symbol mapping for tickers listed on several exchanges.
 
 ---
 
@@ -483,6 +537,7 @@ frontend/src
 │   ├── stocks/     # details: price/candlestick + SMA overlays + volume, metrics, forecast chart
 │   ├── compare/    # 2–5 symbols: metrics table, normalised chart, "ask AI about this comparison"
 │   ├── ai/         # conversations, grounded answers with data timestamp & metrics
+│   ├── admin/      # back office: overview, users, stocks, market data, sync jobs, providers, audit log ✅
 │   └── profile/
 ├── components/     # Disclaimer, MetricCard, PeriodSelector, ErrorState, charts/*
 └── lib/            # Intl number/currency/percent formatting, dates
@@ -494,7 +549,11 @@ global client store), React Router 8 with lazy, code-split routes, Axios, React 
 
 * **Auth**: access token in memory only; HttpOnly refresh cookie the SPA never sees. One HTTP client owns bearer
   headers, refresh-and-retry on 401 (single flight, Web Locks across tabs) and error normalisation; the
-  `AuthProvider` restores the session on load and reacts to expiry; route guards redirect and return.
+  `AuthProvider` restores the session on load and reacts to expiry; route guards redirect and return
+  (`PasswordChangeRoute` forces a new password after an administrator-issued temporary one).
+* **Admin console** ✅: `/app/admin/**` behind `AdminRoute` (in-shell 403 for non-administrators; the backend enforces
+  access independently); the sidebar's admin section is rendered for administrators only. Job pages poll while a job
+  is queued or running and refresh price, analytics, forecast and dashboard queries when it finishes.
 * **Server state**: query keys in one place, invalidation after mutations, polling only while newly watched stocks
   are still `PENDING`.
 * **Tests**: Vitest + Testing Library + MSW against the real route tree and providers; unhandled requests fail.
@@ -532,12 +591,27 @@ sequenceDiagram
   detection, 7-day sliding expiry capped by a 30-day absolute session lifetime, revoked on logout.
 * **Passwords**: BCrypt (work factor 12) behind a `DelegatingPasswordEncoder` (algorithm prefix, transparent rehash
   on login); policy 12 chars – 72 bytes; constant-work login path for unknown e-mails.
-* **Authorization**: deny-by-default filter chain; `ADMIN` required on `/api/v1/admin/**` and via `@PreAuthorize`;
-  ownership always from the principal. The `/api/v1/auth/**` endpoints ignore `Authorization` headers, so a client
-  still sending an expired access token can always refresh or sign out.
-* **Known trade-offs**: an access token stays valid until expiry (≤ 15 min) after logout or role change;
-  HS256 uses one shared key (move to RS256/ES256 + JWKS with key rotation when another service must verify tokens);
-  e-mail verification, password reset and login rate limiting are on the roadmap.
+* **Authorization**: deny-by-default filter chain; `/api/v1/admin/**` requires an `ADMIN` token **and** an account that
+  is still an active administrator in the database (`AccessPolicies.activeAdministrator`, one indexed lookup per admin
+  request), plus `@PreAuthorize` on every admin service; ownership always from the principal. The
+  `/api/v1/auth/**` endpoints ignore `Authorization` headers, so a client still sending an expired access token can
+  always refresh, change its password or sign out.
+* **Account status and forced password change**: `ACTIVE | DISABLED | LOCKED`; only active accounts sign in or
+  refresh, and disabling/locking/resetting revokes every session. Accounts created or reset by an administrator can
+  require a new password: their tokens carry `password_change_required`, mapped to a `PASSWORD_CHANGE_REQUIRED`
+  authority that the filter chain restricts to `GET /users/me` (403 `PASSWORD_CHANGE_REQUIRED` elsewhere) until
+  `POST /auth/password` (refresh cookie + current password) issues a fresh session.
+* **Administration safeguards** (identity module): administrators cannot delete, disable, lock or demote themselves;
+  the last active administrator cannot be removed — checked under `SELECT … FOR UPDATE` on all active administrators.
+  Account deletion publishes `UserAccountDeleted` inside the transaction so the user and watchlist modules delete
+  what they own before the account row; cascading FKs remain a safety net only.
+* **First administrator**: `ADMIN_EMAIL`/`ADMIN_PASSWORD` create it once at start-up (idempotent, multi-instance safe);
+  the password is one-time (forced change, `ADMIN_REQUIRE_PASSWORD_CHANGE`). The code has no default credentials;
+  only `.env.example` pre-fills a public dummy login for local development, which must never be used elsewhere.
+* **Known trade-offs**: for non-admin endpoints an access token stays valid until expiry (≤ 15 min) after logout,
+  disabling or a role change; HS256 uses one shared key (move to RS256/ES256 + JWKS with key rotation when another
+  service must verify tokens); e-mail verification, e-mail-based password reset and login rate limiting are on the
+  roadmap.
 
 ---
 
@@ -560,7 +634,10 @@ Keys include a **data version** where data changes (time of the last successful 
 | Dashboard (user-private) | `dashboard:{userId}` | 30 s, evicted on watchlist change |
 
 Never cached globally: anything user-specific without the user id in the key, AI answers, auth data.
-Rate-limit buckets (providers, AI, search, login) also live in Redis.
+Invalidation after market-data changes needs no eviction: every market-data job records a new data version, and
+`MarketDataUpdated` lets analytics warm the new snapshot (forecasts are recomputed on demand). Catalogue changes by
+administrators evict `stock-search`. Rate-limit buckets are in-memory per instance today (job execution is
+serialised cluster-wide); Redis-backed buckets are planned for AI, search and login limits.
 
 ---
 
@@ -568,17 +645,20 @@ Rate-limit buckets (providers, AI, search, login) also live in Redis.
 
 | Job | Trigger | Notes |
 |---|---|---|
-| Daily price sync | cron after US/EU close (configurable), plus catch-up at startup | only tracked stocks; batched; idempotent |
+| Daily price sync ✅ | cron after US/EU close (configurable), plus catch-up at startup | queues an `AUTOMATIC_SYNC` job per watched, active stock without an active job |
+| Market-data job worker ✅ | fixed delay (`MARKET_DATA_JOB_POLL_INTERVAL`) + wake-up after a job is queued | ShedLock `market-data-job-worker`; executes due jobs sequentially within the provider rate limit; 5-minute run budget; recovers abandoned jobs |
+| Job history clean-up ✅ | daily 03:15 UTC | deletes finished jobs older than 90 days |
+| Initial history ✅ | watching a stock without data (same transaction) | `INITIAL_LOAD` job, executed asynchronously |
 | Quote refresh | every 1–5 min during market hours (configurable) | watched stocks only; skipped when markets closed |
-| Backfill | event-driven (`StockWatched`) | asynchronous, rate-limited |
 | Refresh-token cleanup | daily | delete tokens expired > 7 days |
 | AI usage/conversation retention | daily | configurable retention |
 
 `@Scheduled` alone would run every job on every instance, so jobs use **ShedLock** ✅ (JDBC lock table in PostgreSQL,
-database time, `lockAtMostFor`/`lockAtLeastFor`); per-stock leases additionally prevent duplicate work between the
-scheduled job, start-up catch-up and event-driven backfills. If one instance can no longer keep up, work is partitioned through a job table
-consumed with `SELECT … FOR UPDATE SKIP LOCKED`. Events between modules use Spring Modulith's event publication
-registry (transactional outbox) so a crash cannot lose "data updated" notifications.
+database time, `lockAtMostFor`/`lockAtLeastFor`). Market-data work goes through the job table ✅ consumed with
+`SELECT … FOR UPDATE SKIP LOCKED` (one running job per stock), so the scheduler, start-up catch-up, watchlist
+onboarding and administrators never duplicate work; queuing happens in the trigger's transaction, so a crash cannot
+lose it. Events whose loss matters beyond that (e.g. future notifications) should use Spring Modulith's event
+publication registry (transactional outbox).
 
 ---
 
@@ -617,7 +697,7 @@ Naming: `*Test` = fast unit tests (Surefire, `./mvnw test`); `*IT` = container-b
 |---|---|
 | 1 ✅ | `spring-boot-starter-webmvc`, `-validation`, `-security`, `-security-oauth2-resource-server`, `-data-jpa`, `-flyway` + `flyway-database-postgresql`, `postgresql`, `-actuator` + `micrometer-registry-prometheus`, `springdoc-openapi-starter-webmvc-ui`, `spring-modulith-api`; tests: `-webmvc-test`, `-data-jpa-test`, `-security-test`, `spring-boot-testcontainers`, `testcontainers-postgresql`, `spring-modulith-starter-test` (ArchUnit) |
 | 2–4 ✅ | `spring-boot-starter-cache`, `spring-boot-starter-data-redis`, `shedlock-spring` + `shedlock-provider-jdbc-template`; tests: Redis via Testcontainers `GenericContainer` |
-| 3 (licensed provider) | `spring-boot-starter-restclient`, `resilience4j-spring-boot4`, `bucket4j` (Redis-backed), `spring-modulith-starter-jpa` (event registry); tests: WireMock |
+| 3 (licensed provider) ✅ | `spring-boot-starter-restclient`, `bucket4j_jdk17-core` (token bucket); tests: `wiremock-standalone` 3.x. Retries/backoff are implemented by the job runner (persisted attempts survive restarts), so Resilience4j is not needed; a circuit breaker and a Redis-backed bucket are next |
 | Frontend ✅ | `react`, `@mui/material`, `@tanstack/react-query`, `react-router`, `axios`, `react-hook-form`, `zod`, `echarts`; dev: `vite`, `typescript` 6.0, `vitest`, `@testing-library/*`, `msw`, `eslint` + `typescript-eslint` |
 | 4 | – (pure Java) |
 | 6 ✅ | Hipparchus 4.0.3 (`hipparchus-core`, `-stat`, `-optim`: normal quantiles, OLS regression, Brent/BOBYQA optimisers) — the maintained fork of Commons Math 3 (last released 2016); Commons Math 4 is still beta |
@@ -632,9 +712,10 @@ Naming: `*Test` = fast unit tests (Surefire, `./mvnw test`); `*IT` = container-b
 |---|---|---|
 | **1 Foundation ✅** | project structure, PostgreSQL + Flyway, user model, JWT + refresh-token auth, Spring Security, profile, admin stats, OpenAPI, Docker Compose, CI, architecture tests | `./mvnw verify` green (unit + Testcontainers), app boots in Compose, health UP |
 | **2 Stocks & watchlists ✅** | stock catalogue + search, watchlists, add/remove/annotate, ownership & limits, `StockAddedToWatchlist` | user A cannot read/modify user B's watchlists (tests) |
-| **3 Market data ✅** (core) | provider port, synthetic provider, ingestion with leases and backoff, history storage, ShedLock scheduler, sync status; **next**: licensed adapter, retries/circuit breaker, rate limiting (incl. login throttling), manual refresh, token cleanup | idempotent re-runs, sync metrics; WireMock-backed adapter tests |
+| **3 Market data ✅** | provider port v2, synthetic and Twelve Data adapters, job queue and worker, validation, backfill and safe re-population, token-bucket rate limiting, retries with backoff, provider health/usage, ShedLock scheduler, sync status; **next**: circuit breaker, Redis-backed limits (incl. login throttling), token cleanup | idempotent re-runs, sync metrics; WireMock-backed adapter tests ✅ |
 | **4 Analytics ✅** (core) | returns, volatility, drawdown, RSI, momentum, rebased performance, dashboard; **next**: SMA series, comparison endpoint | golden-value unit tests for every formula |
 | **5 Dashboard UI** — frontend phases 1–3 ✅ | React app: shell, auth, dashboard, watchlists, search; **next**: full stock charts, comparison | component tests with MSW; Playwright smoke test against Compose |
 | **6 Forecasting ✅** (phases 1–3 + UI) | model SPI, naive/MA/linear-regression/exponential-smoothing, calibrated ranges, walk-forward backtest metrics, feature engineering, forecast API + chart; **next**: model comparison & auto selection, Monte Carlo, ARIMA, ensembles, AI integration | leakage tests, golden values vs numpy/statsmodels, historical vs forecast vs range separated in UI and API |
 | 7 AI | `LlmProvider` + first vendor, grounded context, validation, conversations, per-user limits & budgets | numeric-grounding tests, conversation isolation tests |
 | 8 Hardening | Redis caching + distributed rate limits, tracing (OTel), dashboards, performance tuning, coverage gates | load test targets met, alerts defined |
+| **Admin console ✅** (admin phases 1–8) | admin authorization with live DB check, admin shell and overview, user administration with safeguards and forced password change, provider port v2 + Twelve Data + health, stock administration, market-data jobs (latest update, backfill, bulk load, safe re-population), job UI with retry/cancel, provider monitoring, audit log, metrics; **next**: market-data deletion, finer admin roles, provider symbol mapping | every admin endpoint 401/403-tested, last-administrator race test, provider failure keeps data (WireMock), MSW-backed UI tests |

@@ -20,16 +20,25 @@ identity    accounts, sessions, JWT, security config            -> shared
 user        profiles                                            -> identity
 stock       catalogue, search                                   -> shared
 watchlist   watchlists, items, limits, starter list             -> identity, stock
-marketdata  provider port, ingestion, stored bars, sync status  -> stock, watchlist
+marketdata  provider port + adapters, job queue/worker, stored   -> stock, watchlist
+            bars, sync status, provider health/usage
 analytics   metrics, performance, dashboard                     -> marketdata, stock, watchlist, identity
+admin       back office: /api/v1/admin/**, dashboard, audit log  -> identity, user, watchlist, stock, marketdata
 ```
 
 - The graph must stay **acyclic**. Do not import another module's `domain`/`application`/`infrastructure`/`api`
   types. If you need something, add it to that module's top-level package (record, interface or event).
-- Published APIs today: `identity.{AuthenticatedUser, CurrentUser, Role, UserRegisteredEvent}`,
-  `stock.{StockCatalog, StockRef, AssetType, UnknownStockException}`,
+- Published APIs today: `identity.{AuthenticatedUser, CurrentUser, Role, AccountStatus, UserRegisteredEvent,
+  UserAccountDeleted, AccountAdministration, ManagedAccount, AccountStatistics}`, `user.UserProfiles`,
+  `stock.{StockCatalog, StockRef, AssetType, UnknownStockException, StockAdministration, ManagedStock}`,
   `watchlist.{WatchlistQueries, StockAddedToWatchlist}`,
-  `marketdata.{PriceHistory, DailyBar, MarketDataStatus}`.
+  `marketdata.{PriceHistory, DailyBar, MarketDataStatus, MarketDataUpdated, MarketDataJobs, MarketDataJobView,
+  MarketDataInventory, MarketDataProviders, MarketDataInterval, MarketDataJob{Type,Status,Trigger},
+  ExistingDataStrategy, ProviderCapabilities, ProviderHealth, ProviderInstrumentMatch, ProviderStockMetadata}`.
+- The `admin` module only orchestrates these published administration APIs and audits every change; business rules
+  stay in the owning module (e.g. the last-administrator rule in identity, safe re-population in marketdata). New
+  operational functions: add the rule/use case to the owning module's published API, then the endpoint, audit entry
+  and UI in `admin`.
 - Reference other modules' data **by id** (e.g. `stock_id`), never with a JPA association across modules.
 - Verify with `./mvnw test -Dtest=ModularityTest,LayeredArchitectureTest`. Module diagrams are written to
   `target/spring-modulith-docs/`.
@@ -56,8 +65,10 @@ analytics   metrics, performance, dashboard                     -> marketdata, s
 | Controller | `@RestController` in `api`; `@CurrentUser AuthenticatedUser user`; request/response **records** in `api` with Bean Validation; `@Operation`/`@Tag`; `201` + `Location` for creates, `204` for deletes. **No class-level `@Validated`** (Spring 7 validates `@RequestParam` constraints itself) | `watchlist/api/WatchlistController.java` |
 | Business error | Subclass `shared.domain.DomainException(code, ErrorCategory, clientSafeMessage)`; `GlobalExceptionHandler` maps the category to HTTP. Messages must be safe to show to users | `watchlist/domain/WatchlistExceptions.java` |
 | Invariant across modules | Synchronous `@EventListener` (same transaction), e.g. profile, starter watchlist, start tracking | `marketdata/application/StockTrackingStarter.java` |
-| Reaction / slow work | `@Async @TransactionalEventListener` (after commit); **method must be `public`** for proxies | `marketdata/application/WatchedStockBackfill.java` |
-| Scheduled job | `@Scheduled(cron = "${…}", zone = "UTC") @SchedulerLock(name = …)` (public method); cron `-` disables it | `marketdata/infrastructure/scheduling/MarketDataSyncJob.java` |
+| Reaction / slow work | `@Async @TransactionalEventListener` (after commit); **method must be `public`** for proxies | `analytics/application/AnalyticsRecalculation.java` |
+| Scheduled job | `@Scheduled(cron = "${…}", zone = "UTC") @SchedulerLock(name = …)` (public method); cron `-` disables it | `marketdata/infrastructure/scheduling/ScheduledMarketDataSync.java` |
+| Background job queue | Entity with a state machine (`marketdata/domain/MarketDataJob`), queued in the trigger's transaction, claimed with `FOR UPDATE SKIP LOCKED`, executed by a ShedLock-serialised worker that is woken up after commit; outside calls happen without a transaction; transient failures re-queue with backoff | `marketdata/application/MarketDataSynchronizationService.java` |
+| Admin operation | Endpoint in `admin/api`, use case in `admin/application` (`@PreAuthorize("hasRole('ADMIN')")`, transaction) calling the owning module's published API and `AuditLog.record(...)` in the same transaction | `admin/application/AdminUserService.java` |
 | Cache | Declare per module with a `RedisCacheManagerBuilderCustomizer` using `CacheConfiguration.typedJsonCache(...)` (typed JSON, TTL). Put a **data version** in keys instead of evicting. Cache failures are logged, never fatal. When a cached type's shape changes, bump `spring.cache.redis.key-prefix` (`sf:v1:` → `sf:v2:`) | `analytics/infrastructure/AnalyticsCacheConfiguration.java` |
 | Configuration | `@ConfigurationProperties` **records** with `@Validated` + `@DefaultValue`, owned by the layer that uses them; env vars mapped in `application.yml`; fail fast on invalid values | `marketdata/application/MarketDataProperties.java` |
 | Pagination | `shared.api.PageResponse` (`{content, page:{number,size,totalElements,totalPages}}`) | `stock/api/StockController.java` |
@@ -68,7 +79,12 @@ analytics   metrics, performance, dashboard                     -> marketdata, s
   There is **no custom JWT filter**; keep it that way. Tokens carry `typ=at+jwt`, `iss`, `aud`, `sub` = user id,
   `email` and `roles`.
 - `SecurityConfiguration` is deny-by-default. New public endpoints must be added there deliberately, and
-  `/api/v1/admin/**` requires `ADMIN` (plus `@PreAuthorize` on the service).
+  `/api/v1/admin/**` requires an `ADMIN` token **and** a currently active administrator account
+  (`AccessPolicies.activeAdministrator`), plus `@PreAuthorize("hasRole('ADMIN')")` on every admin service.
+- Tokens of users with a pending forced password change carry the `PASSWORD_CHANGE_REQUIRED` authority and may only
+  call `GET /users/me` and `/auth/*` (403 `PASSWORD_CHANGE_REQUIRED` otherwise).
+- Admin actions are audited with `admin.application.AuditLog` (metadata keys naming credentials are dropped, but never
+  pass secrets in the first place).
 - Refresh tokens: opaque, SHA-256 hashed at rest, rotated on every use, replay revokes the family; persisted
   "remember me" flag. Passwords: BCrypt via `DelegatingPasswordEncoder`, 12 characters to 72 UTF-8 bytes.
 - Foreign or missing user-scoped resources → the module's `*_NOT_FOUND` (404). Never 403 for ownership checks.
@@ -84,11 +100,17 @@ analytics   metrics, performance, dashboard                     -> marketdata, s
 
 ## Market data and analytics
 
-- Never call a `MarketDataProvider` from a request path. Ingestion runs on watch (async backfill), on the daily
-  ShedLock job and on start-up catch-up; claims use a DB lease so no connection is held during provider calls.
+- Never call a `MarketDataProvider` from a request path. Ingestion always runs as jobs (`MarketDataJobService`
+  queues, `MarketDataSynchronizationService` executes): watching a stock without data, the daily ShedLock job,
+  start-up catch-up and admin requests. Only the admin provider search/metadata lookup and health check call the
+  provider synchronously — never inside a DB transaction (`ProviderUsageRecorder` writes in `REQUIRES_NEW`).
 - The `synthetic` provider must keep reporting `synthetic: true`. Real adapters live in
-  `marketdata/infrastructure/provider/<vendor>/` behind `@ConditionalOnProperty(app.market-data.provider=<id>)`
-  (see the `market-data-provider` skill).
+  `marketdata/infrastructure/provider/<vendor>/` behind `@ConditionalOnMarketDataProvider(MarketDataProviderType.X)`
+  (accepts `twelve-data` and `TWELVE_DATA`), acquire `ProviderThrottle` permits per vendor request, record usage and
+  throw `MarketDataProviderException` with a `ProviderErrorCode` (see the `market-data-provider` skill).
+- Prices: OHLC split-adjusted, `adjusted_close` split- and dividend-adjusted; validate every response with
+  `MarketDataValidationService` before writing; destructive replacement only through `MarketDataRepopulationService`
+  (stage, verify, swap in one transaction).
 - Metric definitions live in the pure `quant` module (`quant/PriceSeries.java`, trailing series in
   `quant/Indicators.java`), shared by analytics and forecasting so neither depends on the other. Return
   `OptionalDouble`/empty (or NaN warm-up values) when history is too short. New metrics need **golden-value tests
@@ -117,7 +139,12 @@ analytics   metrics, performance, dashboard                     -> marketdata, s
   `./mvnw verify`).
 - Integration tests use the `@IntegrationTest` meta-annotation (`support/IntegrationTest.java`): full context,
   MockMvc with the real filter chain, PostgreSQL and Redis via Testcontainers. Drive the API with
-  `support/AuthTestClient` (register/login) and `support/WatchlistTestClient` (watchlists, `awaitMarketData`).
+  `support/AuthTestClient` (register/login), `support/WatchlistTestClient` (watchlists, `awaitMarketData`) and
+  `support/AdminTestClient` (`newAdmin()`, `registerStock`, `backfill`, `awaitJob`; `uniqueSymbol()` for isolated
+  synthetic stocks). Programmatic transactions in unit tests: `support/NoOpTransactions.template()`.
+- A test that needs a database it fully controls (e.g. "the last administrator") or another provider runs in its own
+  context: `@TestPropertySource` with distinct properties (see `AdminSafeguardsIT`, `TwelveDataIntegrationIT` with
+  WireMock via `@DynamicPropertySource`). Use this sparingly: every extra context starts its own containers.
 - Tests share one context and database: use unique users (`AuthTestClient.uniqueEmail()`) and never assume global
   counts. Wait for async work with Awaitility, never `Thread.sleep`.
 - Persistence tests: `@DataJpaTest @AutoConfigureTestDatabase(replace = NONE) @Import(PostgresTestcontainersConfiguration.class)`.
@@ -138,6 +165,9 @@ analytics   metrics, performance, dashboard                     -> marketdata, s
   `/.well-known/oauth-protected-resource` (customised in `SecurityConfiguration`).
 - Micrometer gauges must reference a mutable holder (`AtomicLong`) registered once.
 - `@Async`, `@SchedulerLock` and `@Transactional` only work through proxies: public methods, no self-invocation.
+- `@Modifying(clearAutomatically = true)` detaches loaded entities; only read their in-memory state afterwards.
+- Bucket4j's blocking `tryConsume` rejects a zero wait; `Bucket4jProviderThrottle` handles that.
+- WireMock 3 standalone (shaded) is used for HTTP stubs; it does not clash with Jackson 3 or Tomcat.
 
 ## Commands
 

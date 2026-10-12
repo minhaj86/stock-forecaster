@@ -17,7 +17,12 @@ public interface StockCatalog {
      */
     StockRef getBySymbol(String symbol);
 
+    /** Includes inactive stocks. */
     Optional<StockRef> findById(UUID id);
 
+    /** Includes inactive stocks (existing watchlist items and history keep referring to them). */
     List<StockRef> findAllByIds(Collection<UUID> ids);
+
+    /** Only stocks that are currently active (searchable, watchable and synchronised). */
+    List<StockRef> findAllActiveByIds(Collection<UUID> ids);
 }

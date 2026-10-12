@@ -1,5 +1,6 @@
 package com.stockforecast.identity.application;
 
+import com.stockforecast.identity.AccountStatus;
 import com.stockforecast.identity.Role;
 import com.stockforecast.identity.UserRegisteredEvent;
 import com.stockforecast.identity.domain.EmailAddress;
@@ -48,17 +49,30 @@ public class RegistrationService {
     }
 
     /**
-     * Creates an account with the given role. Used by self-service registration and by operational
-     * bootstrapping of the first administrator.
+     * Creates an active account with the given role and a password the user chose.
      */
     @Transactional
     public UserAccount createAccount(EmailAddress email, String rawPassword, String displayName, Role role) {
+        return createAccount(email, rawPassword, displayName, role, AccountStatus.ACTIVE, false);
+    }
+
+    /**
+     * Creates an account. Used by self-service registration, administrators and operational bootstrapping of the
+     * first administrator. Listeners of {@link UserRegisteredEvent} (profile, starter watchlist) run in the same
+     * transaction, so an invalid display name rolls the account back too.
+     *
+     * @param passwordChangeRequired the password is temporary and must be replaced at the first sign-in
+     */
+    @Transactional
+    public UserAccount createAccount(EmailAddress email, String rawPassword, String displayName, Role role,
+                                     AccountStatus status, boolean passwordChangeRequired) {
         PasswordPolicy.DEFAULT.validate(rawPassword);
         if (accounts.existsByEmail(email.value())) {
             throw new EmailAlreadyRegisteredException();
         }
         Instant now = clock.instant();
-        UserAccount account = accounts.save(UserAccount.register(email, passwordEncoder.encode(rawPassword), role, now));
+        UserAccount account = accounts.save(UserAccount.provision(email, passwordEncoder.encode(rawPassword), role,
+                status, passwordChangeRequired, now));
         events.publishEvent(new UserRegisteredEvent(account.getId(), account.getEmail(), displayName, now));
         return account;
     }

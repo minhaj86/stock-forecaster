@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { LoginRequest, RegisterRequest, UserSummary } from '@/models/auth';
+import type { ChangePasswordRequest, LoginRequest, RegisterRequest, UserSummary } from '@/models/auth';
 
 export type AuthStatus = 'initializing' | 'authenticated' | 'unauthenticated';
 
@@ -10,6 +10,8 @@ export interface AuthContextValue {
   sessionExpired: boolean;
   login: (request: LoginRequest) => Promise<void>;
   register: (request: RegisterRequest) => Promise<void>;
+  /** Replaces the current (or administrator-issued temporary) password; the session continues with a new token. */
+  changePassword: (request: ChangePasswordRequest) => Promise<void>;
   logout: () => Promise<void>;
 }
 

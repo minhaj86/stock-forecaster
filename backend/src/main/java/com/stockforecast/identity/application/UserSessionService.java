@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Lifecycle of login sessions: start (after login/registration), refresh with rotation and replay detection,
@@ -77,7 +78,7 @@ public class UserSessionService {
             throw new InvalidRefreshTokenException();
         }
 
-        Optional<UserAccount> account = accounts.findById(current.getUserId()).filter(UserAccount::isEnabled);
+        Optional<UserAccount> account = accounts.findById(current.getUserId()).filter(UserAccount::isActive);
         if (account.isEmpty()) {
             refreshTokens.revokeFamily(current.getFamilyId(), RevocationReason.ACCOUNT_DISABLED, now);
             throw new InvalidRefreshTokenException();
@@ -118,10 +119,22 @@ public class UserSessionService {
         return refreshTokens.findByTokenHashForUpdate(tokenGenerator.hash(rawRefreshToken));
     }
 
+    /**
+     * Signs the user out everywhere, e.g. after a password change or an administrative action.
+     *
+     * @return number of refresh tokens revoked
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int endAllSessions(UUID userId, RevocationReason reason) {
+        return refreshTokens.revokeAllOfUser(userId, reason, clock.instant());
+    }
+
     private AuthenticationResult authenticated(UserAccount account, String rawRefreshToken, RefreshToken token,
                                                Instant now) {
         var user = account.toAuthenticatedUser();
-        return new AuthenticationResult(user, accessTokenIssuer.issue(user, now),
-                new IssuedRefreshToken(rawRefreshToken, token.getExpiresAt(), token.isPersistent()));
+        boolean passwordChangeRequired = account.isPasswordChangeRequired();
+        return new AuthenticationResult(user, accessTokenIssuer.issue(user, passwordChangeRequired, now),
+                new IssuedRefreshToken(rawRefreshToken, token.getExpiresAt(), token.isPersistent()),
+                passwordChangeRequired);
     }
 }
